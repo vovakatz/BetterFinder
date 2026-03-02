@@ -48,6 +48,40 @@ struct VerticalDragHandle: View {
     }
 }
 
+struct DualPaneDragHandle: View {
+    @Binding var fraction: Double
+    let totalWidth: CGFloat
+    @State private var dragStartFraction: Double?
+
+    var body: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: 5)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { value in
+                        if dragStartFraction == nil {
+                            dragStartFraction = fraction
+                        }
+                        let delta = value.translation.width / totalWidth
+                        let newFraction = (dragStartFraction ?? fraction) + delta
+                        fraction = max(0.2, min(newFraction, 0.8))
+                    }
+                    .onEnded { _ in
+                        dragStartFraction = nil
+                    }
+            )
+            .onHover { hovering in
+                if hovering {
+                    NSCursor.resizeLeftRight.push()
+                } else {
+                    NSCursor.pop()
+                }
+            }
+    }
+}
+
 struct ContentView: View {
     @State private var fileListVM = FileListViewModel()
     @State private var sidebarVM = SidebarViewModel()
@@ -62,6 +96,7 @@ struct ContentView: View {
     @AppStorage("bottomPanelWidgetRaw") private var bottomPanelWidgetRaw: String = "Terminal"
     @State private var clipboardService = ClipboardService()
     @State private var showDualPane: Bool = false
+    @State private var dualPaneSplitFraction: Double = 0.5
     @State private var secondFileListVM = FileListViewModel()
     @State private var activePaneIsSecond: Bool = false
     @State private var bottomPanelHeight: CGFloat?
@@ -124,8 +159,9 @@ struct ContentView: View {
                                 isActive: !activePaneIsSecond || !showDualPane,
                                 onActivate: { activePaneIsSecond = false }
                             )
+                            .frame(width: showDualPane ? geo.size.width * dualPaneSplitFraction - 2.5 : nil)
                             if showDualPane {
-                                Divider()
+                                DualPaneDragHandle(fraction: $dualPaneSplitFraction, totalWidth: geo.size.width)
                                 MainContentView(
                                     viewModel: secondFileListVM,
                                     isActive: activePaneIsSecond,
