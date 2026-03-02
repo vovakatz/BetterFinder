@@ -10,7 +10,7 @@ struct TerminalWidgetView: View {
     var body: some View {
         VStack(spacing: 0) {
             WidgetHeaderView(widgetType: $widgetType, leadingButtons: {
-                Toggle("Follow Path", isOn: $pathFollowing)
+                Toggle("Auto Sync", isOn: $pathFollowing)
                     .toggleStyle(.checkbox)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
