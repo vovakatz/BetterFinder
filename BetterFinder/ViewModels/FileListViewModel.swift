@@ -568,6 +568,82 @@ final class FileListViewModel {
         Task { await reload() }
     }
 
+    // MARK: - Compress (Zip)
+
+    func zipItems(_ urls: Set<URL>) {
+        guard !urls.isEmpty else { return }
+        let directory = currentURL
+        let sortedURLs = urls.sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        // Determine archive name
+        let baseName: String
+        if sortedURLs.count == 1 {
+            baseName = sortedURLs[0].deletingPathExtension().lastPathComponent
+        } else {
+            baseName = "Archive"
+        }
+
+        // Deduplicate: find a unique name
+        let fm = FileManager.default
+        var archiveName = "\(baseName).zip"
+        var counter = 2
+        while fm.fileExists(atPath: directory.appendingPathComponent(archiveName).path) {
+            archiveName = "\(baseName) \(counter).zip"
+            counter += 1
+        }
+
+        let archiveURL = directory.appendingPathComponent(archiveName)
+
+        Task.detached {
+            do {
+                if sortedURLs.count == 1 {
+                    // Single item: use ditto directly
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+                    process.arguments = ["-c", "-k", "--sequesterRsrc", "--keepParent",
+                                         sortedURLs[0].path, archiveURL.path]
+                    let errorPipe = Pipe()
+                    process.standardError = errorPipe
+                    try process.run()
+                    process.waitUntilExit()
+
+                    if process.terminationStatus != 0 {
+                        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                        let msg = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+                        await MainActor.run { self.errorMessage = "Compress failed: \(msg)" }
+                    }
+                } else {
+                    // Multiple items: use /usr/bin/zip from the current directory
+                    let process = Process()
+                    process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+                    process.currentDirectoryURL = directory
+                    var arguments = ["-r", "-y", archiveURL.path]
+                    for url in sortedURLs {
+                        arguments.append(url.lastPathComponent)
+                    }
+                    process.arguments = arguments
+                    let errorPipe = Pipe()
+                    process.standardError = errorPipe
+                    process.standardOutput = Pipe() // suppress output
+                    try process.run()
+                    process.waitUntilExit()
+
+                    if process.terminationStatus != 0 {
+                        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                        let msg = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+                        await MainActor.run { self.errorMessage = "Compress failed: \(msg)" }
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = "Compress failed: \(error.localizedDescription)"
+                }
+            }
+
+            await self.reload()
+        }
+    }
+
     // MARK: - Drop/Move operations
 
     func requestMoveItems(_ urls: [URL], destination: URL? = nil) {

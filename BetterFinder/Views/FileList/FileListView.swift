@@ -30,6 +30,7 @@ struct FileListView: View {
     var onRename: (URL, String) -> Void = { _, _ in }
     @Binding var showDeleteConfirmation: Bool
 
+    var onZip: (Set<URL>) -> Void = { _ in }
     var onDrop: ([URL], Bool) -> Void = { _, _ in }
     var onDropIntoFolder: ([URL], URL, Bool) -> Void = { _, _, _ in }
     var onConfirmMove: () -> Void = {}
@@ -416,6 +417,13 @@ struct FileListView: View {
             Button("Delete...", role: .destructive) {
                 selection = targetURLs
                 onRequestDelete(targetURLs)
+            }
+
+            Divider()
+
+            Button("Compress") {
+                selection = targetURLs
+                onZip(targetURLs)
             }
         }
     }

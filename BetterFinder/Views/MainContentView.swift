@@ -54,6 +54,7 @@ struct MainContentView: View {
                 onCreateFile: { viewModel.createFile(name: $0) },
                 onRename: { viewModel.renameItem(at: $0, to: $1) },
                 showDeleteConfirmation: $viewModel.showDeleteConfirmation,
+                onZip: { viewModel.zipItems($0) },
                 onDrop: { urls, isCopy in
                     if isCopy {
                         viewModel.requestCopyItems(urls)
