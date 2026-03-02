@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import ImageIO
 
 struct FileMetadata {
     var name: String = ""
@@ -118,10 +119,167 @@ private func mountAndDevice(for path: String) -> (mount: String, device: String)
     return (mount, device)
 }
 
+struct ImageMetadata {
+    var pixelWidth: Int = 0
+    var pixelHeight: Int = 0
+    var colorModel: String = ""
+    var colorProfile: String = ""
+    var depth: Int = 0
+    var dpiWidth: Double?
+    var dpiHeight: Double?
+    var hasAlpha: Bool = false
+
+    // EXIF
+    var cameraMake: String?
+    var cameraModel: String?
+    var lensModel: String?
+    var exposureTime: String?
+    var fNumber: String?
+    var iso: String?
+    var focalLength: String?
+    var focalLength35mm: String?
+    var flash: String?
+    var dateTaken: String?
+    var whiteBalance: String?
+    var meteringMode: String?
+    var exposureProgram: String?
+    var exposureBias: String?
+
+    // GPS
+    var latitude: Double?
+    var longitude: Double?
+    var altitude: Double?
+
+    var dimensionSummary: String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        let w = formatter.string(from: NSNumber(value: pixelWidth)) ?? "\(pixelWidth)"
+        let h = formatter.string(from: NSNumber(value: pixelHeight)) ?? "\(pixelHeight)"
+        return "\(w) x \(h)"
+    }
+
+    static func fetch(from url: URL) -> ImageMetadata? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else { return nil }
+
+        var meta = ImageMetadata()
+        meta.pixelWidth = props[kCGImagePropertyPixelWidth] as? Int ?? 0
+        meta.pixelHeight = props[kCGImagePropertyPixelHeight] as? Int ?? 0
+        meta.colorModel = props[kCGImagePropertyColorModel] as? String ?? ""
+        meta.colorProfile = props[kCGImagePropertyProfileName] as? String ?? ""
+        meta.depth = props[kCGImagePropertyDepth] as? Int ?? 0
+        meta.dpiWidth = props[kCGImagePropertyDPIWidth] as? Double
+        meta.dpiHeight = props[kCGImagePropertyDPIHeight] as? Double
+        meta.hasAlpha = props[kCGImagePropertyHasAlpha] as? Bool ?? false
+
+        // EXIF data
+        if let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] {
+            meta.dateTaken = exif[kCGImagePropertyExifDateTimeOriginal] as? String
+
+            if let exposure = exif[kCGImagePropertyExifExposureTime] as? Double {
+                if exposure >= 1 {
+                    meta.exposureTime = String(format: "%.1fs", exposure)
+                } else {
+                    let denom = Int(round(1.0 / exposure))
+                    meta.exposureTime = "1/\(denom)s"
+                }
+            }
+
+            if let f = exif[kCGImagePropertyExifFNumber] as? Double {
+                meta.fNumber = String(format: "f/%.1f", f)
+            }
+
+            if let isoValues = exif[kCGImagePropertyExifISOSpeedRatings] as? [Int], let first = isoValues.first {
+                meta.iso = "ISO \(first)"
+            }
+
+            if let fl = exif[kCGImagePropertyExifFocalLength] as? Double {
+                meta.focalLength = String(format: "%.1f mm", fl)
+            }
+
+            if let fl35 = exif[kCGImagePropertyExifFocalLenIn35mmFilm] as? Int {
+                meta.focalLength35mm = "\(fl35) mm"
+            }
+
+            if let flashVal = exif[kCGImagePropertyExifFlash] as? Int {
+                meta.flash = (flashVal & 0x1) != 0 ? "Fired" : "Did not fire"
+            }
+
+            if let wb = exif[kCGImagePropertyExifWhiteBalance] as? Int {
+                meta.whiteBalance = wb == 0 ? "Auto" : "Manual"
+            }
+
+            if let metering = exif[kCGImagePropertyExifMeteringMode] as? Int {
+                switch metering {
+                case 1: meta.meteringMode = "Average"
+                case 2: meta.meteringMode = "Center-weighted"
+                case 3: meta.meteringMode = "Spot"
+                case 4: meta.meteringMode = "Multi-spot"
+                case 5: meta.meteringMode = "Pattern"
+                case 6: meta.meteringMode = "Partial"
+                default: meta.meteringMode = "Unknown"
+                }
+            }
+
+            if let prog = exif[kCGImagePropertyExifExposureProgram] as? Int {
+                switch prog {
+                case 1: meta.exposureProgram = "Manual"
+                case 2: meta.exposureProgram = "Normal"
+                case 3: meta.exposureProgram = "Aperture Priority"
+                case 4: meta.exposureProgram = "Shutter Priority"
+                case 5: meta.exposureProgram = "Creative"
+                case 6: meta.exposureProgram = "Action"
+                case 7: meta.exposureProgram = "Portrait"
+                case 8: meta.exposureProgram = "Landscape"
+                default: meta.exposureProgram = nil
+                }
+            }
+
+            if let bias = exif[kCGImagePropertyExifExposureBiasValue] as? Double {
+                meta.exposureBias = String(format: "%+.1f EV", bias)
+            }
+        }
+
+        // TIFF data for camera make/model
+        if let tiff = props[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
+            meta.cameraMake = tiff[kCGImagePropertyTIFFMake] as? String
+            meta.cameraModel = tiff[kCGImagePropertyTIFFModel] as? String
+        }
+
+        // EXIF Aux for lens
+        if let exifAux = props[kCGImagePropertyExifAuxDictionary] as? [CFString: Any] {
+            meta.lensModel = exifAux[kCGImagePropertyExifAuxLensModel] as? String
+        }
+        // Also check EXIF dict for lens
+        if meta.lensModel == nil,
+           let exif = props[kCGImagePropertyExifDictionary] as? [CFString: Any] {
+            meta.lensModel = exif[kCGImagePropertyExifLensModel] as? String
+        }
+
+        // GPS data
+        if let gps = props[kCGImagePropertyGPSDictionary] as? [CFString: Any] {
+            if let lat = gps[kCGImagePropertyGPSLatitude] as? Double,
+               let latRef = gps[kCGImagePropertyGPSLatitudeRef] as? String {
+                meta.latitude = latRef == "S" ? -lat : lat
+            }
+            if let lon = gps[kCGImagePropertyGPSLongitude] as? Double,
+               let lonRef = gps[kCGImagePropertyGPSLongitudeRef] as? String {
+                meta.longitude = lonRef == "W" ? -lon : lon
+            }
+            meta.altitude = gps[kCGImagePropertyGPSAltitude] as? Double
+        }
+
+        // Only return if we got valid dimensions
+        guard meta.pixelWidth > 0 && meta.pixelHeight > 0 else { return nil }
+        return meta
+    }
+}
+
 struct InfoWidgetView: View {
     let selectedURLs: Set<URL>
     @Binding var widgetType: WidgetType
     @State private var metadata: FileMetadata?
+    @State private var imageMetadata: ImageMetadata?
     @State private var calculatedFolderSize: Int64?
     @State private var isCalculatingSize = false
 
@@ -164,6 +322,89 @@ struct InfoWidgetView: View {
                                     }
                                     .font(.system(size: 10))
                                     .foregroundStyle(.secondary)
+                                }
+                            }
+                            if let img = imageMetadata {
+                                Divider().padding(.vertical, 4)
+                                infoRow("Image", img.dimensionSummary)
+                                infoRow("Width", "\(img.pixelWidth) px")
+                                infoRow("Height", "\(img.pixelHeight) px")
+                                if !img.colorModel.isEmpty {
+                                    infoRow("Color", img.colorModel)
+                                }
+                                if !img.colorProfile.isEmpty {
+                                    infoRow("Profile", img.colorProfile)
+                                }
+                                if img.depth > 0 {
+                                    infoRow("Depth", "\(img.depth) bit")
+                                }
+                                if img.hasAlpha {
+                                    infoRow("Alpha", "Yes")
+                                }
+                                if let dpiW = img.dpiWidth, let dpiH = img.dpiHeight {
+                                    if dpiW == dpiH {
+                                        infoRow("DPI", String(format: "%.0f", dpiW))
+                                    } else {
+                                        infoRow("DPI", String(format: "%.0f x %.0f", dpiW, dpiH))
+                                    }
+                                }
+
+                                // Camera / EXIF section
+                                if img.cameraMake != nil || img.cameraModel != nil || img.exposureTime != nil {
+                                    Divider().padding(.vertical, 4)
+                                    if let make = img.cameraMake {
+                                        infoRow("Make", make)
+                                    }
+                                    if let model = img.cameraModel {
+                                        infoRow("Camera", model)
+                                    }
+                                    if let lens = img.lensModel {
+                                        infoRow("Lens", lens)
+                                    }
+                                    if let exp = img.exposureTime {
+                                        infoRow("Exposure", exp)
+                                    }
+                                    if let f = img.fNumber {
+                                        infoRow("Aperture", f)
+                                    }
+                                    if let iso = img.iso {
+                                        infoRow("ISO", iso)
+                                    }
+                                    if let fl = img.focalLength {
+                                        if let fl35 = img.focalLength35mm {
+                                            infoRow("Focal Len", "\(fl) (\(fl35) eq.)")
+                                        } else {
+                                            infoRow("Focal Len", fl)
+                                        }
+                                    }
+                                    if let flash = img.flash {
+                                        infoRow("Flash", flash)
+                                    }
+                                    if let prog = img.exposureProgram {
+                                        infoRow("Program", prog)
+                                    }
+                                    if let metering = img.meteringMode {
+                                        infoRow("Metering", metering)
+                                    }
+                                    if let wb = img.whiteBalance {
+                                        infoRow("White Bal", wb)
+                                    }
+                                    if let bias = img.exposureBias {
+                                        infoRow("Exp Bias", bias)
+                                    }
+                                    if let date = img.dateTaken {
+                                        infoRow("Taken", date)
+                                    }
+                                }
+
+                                // GPS section
+                                if let lat = img.latitude, let lon = img.longitude {
+                                    Divider().padding(.vertical, 4)
+                                    infoRow("Latitude", String(format: "%.6f", lat))
+                                    infoRow("Longitude", String(format: "%.6f", lon))
+                                    if let alt = img.altitude {
+                                        infoRow("Altitude", String(format: "%.1f m", alt))
+                                    }
                                 }
                             }
                             Divider().padding(.vertical, 4)
@@ -286,8 +527,16 @@ struct InfoWidgetView: View {
         isCalculatingSize = false
         if selectedURLs.count == 1, let url = selectedURLs.first {
             metadata = FileMetadata.fetch(from: url)
+            // Check if it's an image and fetch image-specific metadata
+            if let contentType = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType,
+               contentType.conforms(to: .image) {
+                imageMetadata = ImageMetadata.fetch(from: url)
+            } else {
+                imageMetadata = nil
+            }
         } else {
             metadata = nil
+            imageMetadata = nil
         }
     }
 
