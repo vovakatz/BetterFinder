@@ -5,10 +5,15 @@ struct TerminalWidgetView: View {
     @Binding var widgetType: WidgetType
     @State private var session = TerminalSession()
     @AppStorage("terminalTheme") private var theme: TerminalTheme = .default
+    @State private var pathFollowing: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
-            WidgetHeaderView(widgetType: $widgetType) {
+            WidgetHeaderView(widgetType: $widgetType, leadingButtons: {
+                Toggle("Follow Path", isOn: $pathFollowing)
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
                 Menu {
                     ForEach(TerminalTheme.allCases) { t in
                         Button {
@@ -28,7 +33,7 @@ struct TerminalWidgetView: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-            } extraButtons: {
+            }, extraButtons: {
                 Button {
                     session.clearTerminal()
                 } label: {
@@ -37,13 +42,20 @@ struct TerminalWidgetView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-            }
+            })
             .fixedSize(horizontal: false, vertical: true)
 
             TerminalEmulatorView(session: session, initialDirectory: currentDirectory, theme: theme)
         }
         .onChange(of: currentDirectory) { _, newVal in
-            session.changeDirectory(to: newVal)
+            if pathFollowing {
+                session.changeDirectory(to: newVal)
+            }
+        }
+        .onChange(of: pathFollowing) { _, isFollowing in
+            if isFollowing {
+                session.changeDirectory(to: currentDirectory)
+            }
         }
         .onDisappear {
             session.stop()

@@ -17,9 +17,12 @@ struct WidgetHeaderView<LeadingContent: View, ExtraContent: View>: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                leadingButtons
-                Spacer()
+            ZStack {
+                HStack {
+                    leadingButtons
+                    Spacer()
+                    extraButtons
+                }
                 Menu {
                     ForEach(WidgetType.allCases) { type in
                         Button(type.rawValue) { widgetType = type }
@@ -30,8 +33,6 @@ struct WidgetHeaderView<LeadingContent: View, ExtraContent: View>: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                Spacer()
-                extraButtons
             }
             .padding(.vertical, 6)
             .padding(.horizontal, 8)
