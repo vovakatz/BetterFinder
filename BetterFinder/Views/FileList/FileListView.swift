@@ -363,6 +363,10 @@ struct FileListView: View {
         }
 
         if scheme != "network" && scheme != "smb" && scheme != "afp" {
+            if !displayItem.fileItem.isDirectory || displayItem.fileItem.isPackage {
+                openWithMenu(for: displayItem.fileItem, targetURLs: targetURLs)
+            }
+
             Button("Show in Finder") {
                 selection = targetURLs
                 NSWorkspace.shared.activateFileViewerSelecting([displayItem.fileItem.url])
@@ -432,6 +436,72 @@ struct FileListView: View {
             Button("Compress") {
                 selection = targetURLs
                 onZip(targetURLs)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func openWithMenu(for fileItem: FileItem, targetURLs: Set<URL>) -> some View {
+        let appURLs = NSWorkspace.shared.urlsForApplications(toOpen: fileItem.url)
+        let defaultApp = NSWorkspace.shared.urlForApplication(toOpen: fileItem.url)
+        let sorted = appURLs.sorted {
+            if $0 == defaultApp { return true }
+            if $1 == defaultApp { return false }
+            return appDisplayName($0).localizedCaseInsensitiveCompare(appDisplayName($1)) == .orderedAscending
+        }
+
+        Menu("Open With") {
+            ForEach(sorted, id: \.self) { appURL in
+                let name = appDisplayName(appURL)
+                let isDefault = appURL == defaultApp
+                let label = isDefault ? "\(name) (Default)" : name
+                let icon: NSImage = {
+                    let img = NSWorkspace.shared.icon(forFile: appURL.path)
+                    img.size = NSSize(width: 16, height: 16)
+                    return img
+                }()
+                Button {
+                    openFiles(Array(targetURLs), withApp: appURL)
+                } label: {
+                    Label {
+                        Text(label)
+                    } icon: {
+                        Image(nsImage: icon)
+                    }
+                }
+            }
+            if !sorted.isEmpty {
+                Divider()
+            }
+            Button("Other...") {
+                chooseAppAndOpen(Array(targetURLs))
+            }
+        }
+    }
+
+    private func appDisplayName(_ appURL: URL) -> String {
+        if let bundle = Bundle(url: appURL),
+           let name = bundle.infoDictionary?["CFBundleDisplayName"] as? String ?? bundle.infoDictionary?["CFBundleName"] as? String {
+            return name
+        }
+        return appURL.deletingPathExtension().lastPathComponent
+    }
+
+    private func openFiles(_ urls: [URL], withApp appURL: URL) {
+        let config = NSWorkspace.OpenConfiguration()
+        NSWorkspace.shared.open(urls, withApplicationAt: appURL, configuration: config)
+    }
+
+    private func chooseAppAndOpen(_ urls: [URL]) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.begin { response in
+            if response == .OK, let appURL = panel.url {
+                openFiles(urls, withApp: appURL)
             }
         }
     }
