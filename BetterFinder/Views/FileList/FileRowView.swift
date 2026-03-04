@@ -12,6 +12,7 @@ struct FileRowView: View {
     @Binding var renameText: String
     var onCommitRename: () -> Void = {}
     var onCancelRename: () -> Void = {}
+    var onNameHover: ((Bool) -> Void)?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -51,6 +52,9 @@ struct FileRowView: View {
                         .truncationMode(.middle)
                         .fontWeight(item.isDirectory ? .bold : .regular)
                         .foregroundStyle(item.isHidden ? .gray : .primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onHover { onNameHover?($0) }
                 }
             }
             .padding(.leading, CGFloat(depth) * 16)

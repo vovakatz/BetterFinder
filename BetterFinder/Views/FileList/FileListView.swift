@@ -61,10 +61,11 @@ struct FileListView: View {
                   let displayItem = displayItems.first(where: { $0.id == selectedURL }) else { return }
             onOpen(displayItem.fileItem)
         }
-        let _ = doubleClickProxy.updateSingleClickAction { [selection, displayItems] in
+        let _ = doubleClickProxy.updateSingleClickAction { [selection, displayItems, doubleClickProxy] in
             guard renamingURL == nil,
                   selection.count == 1,
                   let url = selection.first,
+                  doubleClickProxy.nameHoverURL == url,
                   let item = displayItems.first(where: { $0.id == url }) else { return }
             doubleClickProxy.schedulePendingRename {
                 renamingURL = url
@@ -213,7 +214,14 @@ struct FileListView: View {
                 isRenaming: renamingURL == displayItem.id,
                 renameText: $renameText,
                 onCommitRename: { commitRename(for: displayItem.id) },
-                onCancelRename: { cancelRename() }
+                onCancelRename: { cancelRename() },
+                onNameHover: { hovering in
+                    if hovering {
+                        doubleClickProxy.nameHoverURL = displayItem.id
+                    } else if doubleClickProxy.nameHoverURL == displayItem.id {
+                        doubleClickProxy.nameHoverURL = nil
+                    }
+                }
             )
             .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
             .draggable(displayItem.fileItem.url) {
@@ -503,6 +511,7 @@ private class DoubleClickProxy {
     var isHovered = false
     var monitor: Any?
     var pendingRenameWork: DispatchWorkItem?
+    var nameHoverURL: URL?
 
     func updateDoubleClickAction(_ action: @escaping () -> Void) {
         onDoubleClick = action
