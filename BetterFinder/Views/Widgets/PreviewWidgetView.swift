@@ -16,6 +16,8 @@ struct PreviewWidgetView: View {
     @State private var content: PreviewContent = .none
     @State private var editableText = ""
     @State private var originalText = ""
+    @State private var fileModDate: Date?
+    @State private var pollTask: Task<Void, Never>?
 
     private var isTextContent: Bool {
         if case .text = content { return true }
@@ -68,8 +70,10 @@ struct PreviewWidgetView: View {
             .frame(maxHeight: .infinity, alignment: .top)
         }
         .frame(maxHeight: .infinity)
-        .onAppear { loadPreview() }
-        .onChange(of: selectedURLs) { _, _ in loadPreview() }
+        .onAppear { loadPreview(); startPolling() }
+        .onDisappear { pollTask?.cancel() }
+        .onChange(of: selectedURLs) { _, _ in loadPreview(); startPolling() }
+        .onChange(of: fileModDate) { _, _ in loadPreview() }
     }
 
     private var previewHeader: some View {
@@ -167,6 +171,29 @@ struct PreviewWidgetView: View {
             originalText = ""
             content = .unsupported(utType.localizedDescription ?? utType.identifier)
         }
+    }
+
+    private func startPolling() {
+        pollTask?.cancel()
+        guard selectedURLs.count == 1, let url = selectedURLs.first, url.isFileURL else {
+            pollTask = nil
+            return
+        }
+        fileModDate = modificationDate(of: url)
+        pollTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                let newDate = modificationDate(of: url)
+                if newDate != fileModDate {
+                    fileModDate = newDate
+                }
+            }
+        }
+    }
+
+    private func modificationDate(of url: URL) -> Date? {
+        try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
     }
 }
 

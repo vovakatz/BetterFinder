@@ -18,6 +18,8 @@ struct FileItem: Identifiable {
 extension FileItem: Equatable {
     static func == (lhs: FileItem, rhs: FileItem) -> Bool {
         lhs.id == rhs.id
+            && lhs.fileSize == rhs.fileSize
+            && lhs.dateModified == rhs.dateModified
     }
 }
 

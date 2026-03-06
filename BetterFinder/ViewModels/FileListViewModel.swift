@@ -63,6 +63,7 @@ final class FileListViewModel {
     private var storedCredentials: [String: NetworkCredentials] = [:]  // hostname -> creds
     private var directoryMonitors: [URL: DispatchSourceFileSystemObject] = [:]
     private var refreshDebounceTask: Task<Void, Never>?
+    private var pollingTask: Task<Void, Never>?
 
     var volumeStatusText: String {
         if navigationState.isNetworkURL { return "" }
@@ -146,6 +147,7 @@ final class FileListViewModel {
 
     deinit {
         for source in directoryMonitors.values { source.cancel() }
+        pollingTask?.cancel()
     }
 
     func navigate(to url: URL) {
@@ -331,6 +333,7 @@ final class FileListViewModel {
         stopAllMonitors()
         guard currentURL.isFileURL else { return }
         addMonitor(for: currentURL)
+        startPolling()
     }
 
     func updateExpandedMonitors() {
@@ -378,6 +381,62 @@ final class FileListViewModel {
     private func stopAllMonitors() {
         for source in directoryMonitors.values { source.cancel() }
         directoryMonitors.removeAll()
+        pollingTask?.cancel()
+        pollingTask = nil
+    }
+
+    private func startPolling() {
+        pollingTask?.cancel()
+        pollingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled, let self else { return }
+                await self.refreshIfChanged()
+            }
+        }
+    }
+
+    private func refreshIfChanged() async {
+        guard currentURL.isFileURL else { return }
+        // Build lookup of cached modification dates from items and all expanded childItems
+        var cachedModDates: [URL: Date] = [:]
+        for item in items {
+            if let date = item.dateModified { cachedModDates[item.url] = date }
+        }
+        for (_, children) in childItems {
+            for item in children {
+                if let date = item.dateModified { cachedModDates[item.url] = date }
+            }
+        }
+        // Directories to check: current dir + all expanded folders
+        var dirsToCheck = [currentURL]
+        dirsToCheck.append(contentsOf: expandedFolders.filter { $0.isFileURL })
+        let snapshot = cachedModDates
+        let dirs = dirsToCheck
+        let changed: Bool = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                for dir in dirs {
+                    guard let enumerator = FileManager.default.enumerator(
+                        at: dir,
+                        includingPropertiesForKeys: [.contentModificationDateKey],
+                        options: [.skipsSubdirectoryDescendants]
+                    ) else { continue }
+                    for case let fileURL as URL in enumerator {
+                        if let values = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]),
+                           let modDate = values.contentModificationDate,
+                           let cachedDate = snapshot[fileURL],
+                           modDate != cachedDate {
+                            continuation.resume(returning: true)
+                            return
+                        }
+                    }
+                }
+                continuation.resume(returning: false)
+            }
+        }
+        if changed {
+            await refreshItems()
+        }
     }
 
     private func refreshItems() async {
