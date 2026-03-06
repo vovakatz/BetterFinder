@@ -407,7 +407,9 @@ final class FileListViewModel {
     // MARK: - Network Mounting
 
     func attemptMount(_ url: URL, credentials: NetworkCredentials? = nil) async {
+        isLoading = true
         let mountPoint = await networkService.mountShare(url: url, credentials: credentials)
+        isLoading = false
         if let mountPoint {
             // Track which network host/share this mount came from
             let hostname = url.host() ?? ""

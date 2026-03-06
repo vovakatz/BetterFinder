@@ -126,27 +126,29 @@ final class NetworkService {
 
     private func runProcess(_ path: String, arguments: [String]) async -> ProcessResult {
         await withCheckedContinuation { continuation in
-            let process = Process()
-            let stdoutPipe = Pipe()
-            let stderrPipe = Pipe()
-            process.executableURL = URL(filePath: path)
-            process.arguments = arguments
-            process.standardOutput = stdoutPipe
-            process.standardError = stderrPipe
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                let stdoutPipe = Pipe()
+                let stderrPipe = Pipe()
+                process.executableURL = URL(filePath: path)
+                process.arguments = arguments
+                process.standardOutput = stdoutPipe
+                process.standardError = stderrPipe
 
-            do {
-                try process.run()
-                process.waitUntilExit()
-                let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-                let result = ProcessResult(
-                    stdout: String(data: outData, encoding: .utf8) ?? "",
-                    stderr: String(data: errData, encoding: .utf8) ?? "",
-                    exitCode: process.terminationStatus
-                )
-                continuation.resume(returning: result)
-            } catch {
-                continuation.resume(returning: ProcessResult(stdout: "", stderr: error.localizedDescription, exitCode: -1))
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    let outData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+                    let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                    let result = ProcessResult(
+                        stdout: String(data: outData, encoding: .utf8) ?? "",
+                        stderr: String(data: errData, encoding: .utf8) ?? "",
+                        exitCode: process.terminationStatus
+                    )
+                    continuation.resume(returning: result)
+                } catch {
+                    continuation.resume(returning: ProcessResult(stdout: "", stderr: error.localizedDescription, exitCode: -1))
+                }
             }
         }
     }
