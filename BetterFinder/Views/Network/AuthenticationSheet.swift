@@ -57,7 +57,15 @@ struct AuthenticationSheet: View {
         }
         .padding(20)
         .frame(width: 360)
-        .onAppear { usernameFocused = true }
+        .onAppear {
+            // Pre-fill from keychain if credentials exist
+            if let saved = KeychainService.load(for: serverName) {
+                username = saved.username
+                password = saved.password
+                saveToKeychain = true
+            }
+            usernameFocused = true
+        }
     }
 
     private func authenticate() {

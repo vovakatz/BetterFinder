@@ -203,7 +203,7 @@ class GitService {
 
     private func loadLog(at root: URL) -> [GitCommitInfo] {
         let format = "%H%n%h%n%s%n%an%n%aI"
-        let (output, exitCode) = runGit(["log", "--format=\(format)", "-10"], at: root)
+        let (output, exitCode) = runGit(["log", "--format=\(format)", "-20"], at: root)
         guard exitCode == 0, !output.isEmpty else { return [] }
 
         let lines = output.components(separatedBy: "\n")

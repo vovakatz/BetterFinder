@@ -171,10 +171,11 @@ final class FileListViewModel {
             // Expanding a network host — enumerate its shares
             let host = url.host() ?? ""
             guard !host.isEmpty else { return }
-            let creds = storedCredentials[host]
+            let creds = storedCredentials[host] ?? KeychainService.load(for: host)
             let result = await networkService.enumerateShares(on: host, credentials: creds)
             switch result {
             case .success:
+                if let creds { storedCredentials[host] = creds }
                 childItems[url] = networkService.sharesAsFileItems(for: host)
             case .authRequired:
                 // Need auth to list shares — prompt, then retry
@@ -203,9 +204,9 @@ final class FileListViewModel {
         if scheme == "network" {
             navigate(to: item.url)
         } else if scheme == "smb" || scheme == "afp" {
-            // Use stored credentials from the enumeration phase if available
+            // Use stored or keychain credentials if available
             let host = item.url.host() ?? ""
-            let creds = storedCredentials[host]
+            let creds = storedCredentials[host] ?? KeychainService.load(for: host)
             Task { await attemptMount(item.url, credentials: creds) }
         } else if item.isDirectory {
             navigate(to: item.url)
@@ -287,6 +288,12 @@ final class FileListViewModel {
                     errorMessage = "No shares found on \(host)"
                 }
             case .authRequired:
+                // Try keychain credentials before prompting the user
+                if credentials == nil, let saved = KeychainService.load(for: host) {
+                    storedCredentials[host] = saved
+                    await reloadNetwork(credentials: saved)
+                    return
+                }
                 items = []
                 pendingAuthHostname = host
                 pendingMountURL = nil
@@ -402,6 +409,12 @@ final class FileListViewModel {
     func attemptMount(_ url: URL, credentials: NetworkCredentials? = nil) async {
         let mountPoint = await networkService.mountShare(url: url, credentials: credentials)
         if let mountPoint {
+            // Track which network host/share this mount came from
+            let hostname = url.host() ?? ""
+            let shareName = url.lastPathComponent
+            if !hostname.isEmpty {
+                navigationState.networkMounts[mountPoint] = (hostname: hostname, shareName: shareName)
+            }
             navigate(to: mountPoint)
         } else {
             pendingMountURL = url
@@ -410,6 +423,14 @@ final class FileListViewModel {
     }
 
     func authenticateAndMount(credentials: NetworkCredentials) {
+        // Save to keychain if requested
+        if credentials.saveToKeychain {
+            let hostname = pendingAuthHostname ?? pendingMountURL?.host() ?? ""
+            if !hostname.isEmpty {
+                KeychainService.save(username: credentials.username, password: credentials.password, for: hostname)
+            }
+        }
+
         if let hostname = pendingAuthHostname {
             // Auth was for share enumeration
             pendingAuthHostname = nil

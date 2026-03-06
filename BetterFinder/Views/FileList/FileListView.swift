@@ -473,8 +473,42 @@ struct FileListView: View {
             if !sorted.isEmpty {
                 Divider()
             }
+            runningAppsMenu(targetURLs: targetURLs)
             Button("Other...") {
                 chooseAppAndOpen(Array(targetURLs))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func runningAppsMenu(targetURLs: Set<URL>) -> some View {
+        let runningApps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleURL != nil }
+            .sorted { ($0.localizedName ?? "").localizedCaseInsensitiveCompare($1.localizedName ?? "") == .orderedAscending }
+
+        Menu("Running") {
+            ForEach(runningApps, id: \.processIdentifier) { app in
+                if let bundleURL = app.bundleURL {
+                    let name = app.localizedName ?? bundleURL.deletingPathExtension().lastPathComponent
+                    let icon: NSImage = {
+                        if let appIcon = app.icon {
+                            appIcon.size = NSSize(width: 16, height: 16)
+                            return appIcon
+                        }
+                        let img = NSWorkspace.shared.icon(forFile: bundleURL.path)
+                        img.size = NSSize(width: 16, height: 16)
+                        return img
+                    }()
+                    Button {
+                        openFiles(Array(targetURLs), withApp: bundleURL)
+                    } label: {
+                        Label {
+                            Text(name)
+                        } icon: {
+                            Image(nsImage: icon)
+                        }
+                    }
+                }
             }
         }
     }

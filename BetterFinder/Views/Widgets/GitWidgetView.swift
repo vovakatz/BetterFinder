@@ -202,7 +202,7 @@ struct GitWidgetView: View {
 
     private var commitsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeader("Commits", count: nil)
+            sectionHeader("Recent Commits", count: nil)
 
             if gitService.recentCommits.isEmpty {
                 Text("No commits yet")
