@@ -282,6 +282,8 @@ struct InfoWidgetView: View {
     @State private var imageMetadata: ImageMetadata?
     @State private var calculatedFolderSize: Int64?
     @State private var isCalculatingSize = false
+    @State private var fileModDate: Date?
+    @State private var pollTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -464,8 +466,10 @@ struct InfoWidgetView: View {
             .frame(maxHeight: .infinity, alignment: .top)
         }
         .frame(maxHeight: .infinity)
-        .onAppear { fetchMetadata() }
-        .onChange(of: selectedURLs) { _, _ in fetchMetadata() }
+        .onAppear { fetchMetadata(); startPolling() }
+        .onDisappear { pollTask?.cancel() }
+        .onChange(of: selectedURLs) { _, _ in fetchMetadata(); startPolling() }
+        .onChange(of: fileModDate) { _, _ in fetchMetadata() }
     }
 
     @ViewBuilder
@@ -538,6 +542,29 @@ struct InfoWidgetView: View {
             metadata = nil
             imageMetadata = nil
         }
+    }
+
+    private func startPolling() {
+        pollTask?.cancel()
+        guard selectedURLs.count == 1, let url = selectedURLs.first, url.isFileURL else {
+            pollTask = nil
+            return
+        }
+        fileModDate = modificationDate(of: url)
+        pollTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                let newDate = modificationDate(of: url)
+                if newDate != fileModDate {
+                    fileModDate = newDate
+                }
+            }
+        }
+    }
+
+    private func modificationDate(of url: URL) -> Date? {
+        try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
