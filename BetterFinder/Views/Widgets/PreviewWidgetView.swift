@@ -18,6 +18,7 @@ struct PreviewWidgetView: View {
     @State private var originalText = ""
     @State private var fileModDate: Date?
     @State private var pollTask: Task<Void, Never>?
+    @State private var loadTask: Task<Void, Never>?
 
     private var isTextContent: Bool {
         if case .text = content { return true }
@@ -70,10 +71,10 @@ struct PreviewWidgetView: View {
             .frame(maxHeight: .infinity, alignment: .top)
         }
         .frame(maxHeight: .infinity)
-        .onAppear { loadPreview(); startPolling() }
-        .onDisappear { pollTask?.cancel() }
-        .onChange(of: selectedURLs) { _, _ in loadPreview(); startPolling() }
-        .onChange(of: fileModDate) { _, _ in loadPreview() }
+        .onAppear { loadPreviewAsync(); startPolling() }
+        .onDisappear { pollTask?.cancel(); loadTask?.cancel() }
+        .onChange(of: selectedURLs) { _, _ in loadPreviewAsync(); startPolling() }
+        .onChange(of: fileModDate) { _, _ in loadPreviewAsync() }
     }
 
     private var previewHeader: some View {
@@ -107,7 +108,9 @@ struct PreviewWidgetView: View {
         }
     }
 
-    private func loadPreview() {
+    private func loadPreviewAsync() {
+        loadTask?.cancel()
+
         guard selectedURLs.count == 1, let url = selectedURLs.first else {
             content = .none
             editableText = ""
@@ -115,61 +118,66 @@ struct PreviewWidgetView: View {
             return
         }
 
-        guard let resourceValues = try? url.resourceValues(forKeys: [.contentTypeKey]),
-              let utType = resourceValues.contentType else {
-            content = .unsupported("Unknown")
-            editableText = ""
-            originalText = ""
-            return
-        }
-
-        if utType.conforms(to: .pdf) {
-            editableText = ""
-            originalText = ""
-            if let document = PDFDocument(url: url) {
-                content = .pdf(document)
-            } else {
-                content = .unsupported(utType.localizedDescription ?? utType.identifier)
-            }
-        } else if utType.conforms(to: .image) {
-            editableText = ""
-            originalText = ""
-            if let nsImage = NSImage(contentsOf: url) {
-                content = .image(nsImage)
-            } else {
-                content = .unsupported(utType.localizedDescription ?? utType.identifier)
-            }
-        } else if utType.conforms(to: .text)
-                    || utType.conforms(to: .sourceCode)
-                    || utType.conforms(to: .json)
-                    || utType.conforms(to: .xml)
-                    || utType.conforms(to: .yaml)
-                    || utType.conforms(to: .propertyList) {
-            loadTextContent(from: url, utType: utType)
-        } else {
-            // Unknown UTType — try reading as UTF-8 text as a fallback
-            loadTextContent(from: url, utType: utType)
+        loadTask = Task {
+            let result = await loadPreviewContent(url: url)
+            guard !Task.isCancelled else { return }
+            content = result.content
+            editableText = result.editableText
+            originalText = result.originalText
         }
     }
 
-    private func loadTextContent(from url: URL, utType: UTType) {
+    private struct PreviewResult {
+        let content: PreviewContent
+        let editableText: String
+        let originalText: String
+    }
+
+    private func loadPreviewContent(url: URL) async -> PreviewResult {
+        await Task.detached(priority: .userInitiated) {
+            guard let resourceValues = try? url.resourceValues(forKeys: [.contentTypeKey]),
+                  let utType = resourceValues.contentType else {
+                return PreviewResult(content: .unsupported("Unknown"), editableText: "", originalText: "")
+            }
+
+            if utType.conforms(to: .pdf) {
+                if let document = PDFDocument(url: url) {
+                    return PreviewResult(content: .pdf(document), editableText: "", originalText: "")
+                } else {
+                    return PreviewResult(content: .unsupported(utType.localizedDescription ?? utType.identifier), editableText: "", originalText: "")
+                }
+            } else if utType.conforms(to: .image) {
+                if let nsImage = NSImage(contentsOf: url) {
+                    return PreviewResult(content: .image(nsImage), editableText: "", originalText: "")
+                } else {
+                    return PreviewResult(content: .unsupported(utType.localizedDescription ?? utType.identifier), editableText: "", originalText: "")
+                }
+            } else if utType.conforms(to: .text)
+                        || utType.conforms(to: .sourceCode)
+                        || utType.conforms(to: .json)
+                        || utType.conforms(to: .xml)
+                        || utType.conforms(to: .yaml)
+                        || utType.conforms(to: .propertyList) {
+                return Self.loadTextResult(from: url, utType: utType)
+            } else {
+                return Self.loadTextResult(from: url, utType: utType)
+            }
+        }.value
+    }
+
+    nonisolated private static func loadTextResult(from url: URL, utType: UTType) -> PreviewResult {
         do {
             let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
             let fileSize = attrs[.size] as? Int64 ?? 0
             if fileSize > 100_000 {
-                editableText = ""
-                originalText = ""
-                content = .unsupported("File too large to edit (\(fileSize.formattedFileSize))")
+                let sizeStr = ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)
+                return PreviewResult(content: .unsupported("File too large to edit (\(sizeStr))"), editableText: "", originalText: "")
             } else {
                 let text = try String(contentsOf: url, encoding: .utf8)
-                editableText = text
-                originalText = text
-                content = .text(text)
+                return PreviewResult(content: .text(text), editableText: text, originalText: text)
             }
         } catch {
-            editableText = ""
-            originalText = ""
-            content = .unsupported(utType.localizedDescription ?? utType.identifier)
+            return PreviewResult(content: .unsupported(utType.localizedDescription ?? utType.identifier), editableText: "", originalText: "")
         }
     }
 
