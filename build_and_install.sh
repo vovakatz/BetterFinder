@@ -24,10 +24,7 @@ if [ ! -d "$APP_PATH" ]; then
 fi
 
 echo "Installing to $INSTALL_DIR/$APP_NAME.app..."
-if [ -d "$INSTALL_DIR/$APP_NAME.app" ]; then
-    rm -rf "$INSTALL_DIR/$APP_NAME.app"
-fi
-cp -R "$APP_PATH" "$INSTALL_DIR/"
+rsync -a --delete "$APP_PATH/" "$INSTALL_DIR/$APP_NAME.app/"
 
 rm -rf "$BUILD_DIR"
 

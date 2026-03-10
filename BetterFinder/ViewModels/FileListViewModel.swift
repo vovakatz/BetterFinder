@@ -65,6 +65,21 @@ final class FileListViewModel {
     private var refreshDebounceTask: Task<Void, Never>?
     private var pollingTask: Task<Void, Never>?
 
+    // Per-folder sort persistence: path -> SortCriteria
+    private static let sortDefaultsKey = "folderSortOrders"
+    private static var folderSortOrders: [String: SortCriteria] = {
+        guard let data = UserDefaults.standard.data(forKey: sortDefaultsKey),
+              let decoded = try? JSONDecoder().decode([String: SortCriteria].self, from: data)
+        else { return [:] }
+        return decoded
+    }()
+
+    private static func saveFolderSortOrders() {
+        if let data = try? JSONEncoder().encode(folderSortOrders) {
+            UserDefaults.standard.set(data, forKey: sortDefaultsKey)
+        }
+    }
+
     var volumeStatusText: String {
         if navigationState.isNetworkURL { return "" }
         do {
@@ -154,6 +169,7 @@ final class FileListViewModel {
         expandedFolders.removeAll()
         childItems.removeAll()
         navigationState.navigate(to: url)
+        sortCriteria = Self.folderSortOrders[url.path] ?? .default
         Task { await reload() }
     }
 
@@ -219,12 +235,14 @@ final class FileListViewModel {
 
     func goBack() {
         if let _ = navigationState.goBack() {
+            sortCriteria = Self.folderSortOrders[currentURL.path] ?? .default
             Task { await reload() }
         }
     }
 
     func goForward() {
         if let _ = navigationState.goForward() {
+            sortCriteria = Self.folderSortOrders[currentURL.path] ?? .default
             Task { await reload() }
         }
     }
@@ -242,6 +260,14 @@ final class FileListViewModel {
             sortCriteria.field = field
             sortCriteria.ascending = true
         }
+        // Persist per-folder sort (remove entry if back to default)
+        let path = currentURL.path
+        if sortCriteria == .default {
+            Self.folderSortOrders.removeValue(forKey: path)
+        } else {
+            Self.folderSortOrders[path] = sortCriteria
+        }
+        Self.saveFolderSortOrders()
         Task { await reload() }
     }
 
