@@ -295,39 +295,107 @@ struct PreviewWidgetView: View {
     }
 }
 
-private struct ZoomableImageView: View {
+private struct ZoomableImageView: NSViewRepresentable {
     let nsImage: NSImage
     @Binding var zoomScale: CGFloat
     @Binding var steadyZoomScale: CGFloat
 
-    var body: some View {
-        GeometryReader { geo in
-            ScrollView([.horizontal, .vertical]) {
-                Image(nsImage: nsImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(
-                        width: geo.size.width * zoomScale,
-                        height: geo.size.height * zoomScale
-                    )
-                    .frame(
-                        minWidth: geo.size.width,
-                        minHeight: geo.size.height
-                    )
-            }
-            .scrollIndicators(.hidden)
-            .gesture(
-                MagnifyGesture()
-                    .onChanged { value in
-                        zoomScale = max(1.0, steadyZoomScale * value.magnification)
-                    }
-                    .onEnded { value in
-                        zoomScale = max(1.0, steadyZoomScale * value.magnification)
-                        steadyZoomScale = zoomScale
-                    }
-            )
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.allowsMagnification = true
+        scrollView.minMagnification = 1.0
+        scrollView.maxMagnification = 10.0
+        scrollView.backgroundColor = .clear
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.usesPredominantAxisScrolling = false
+
+        let imageView = ImageDocumentView(image: nsImage)
+        imageView.autoresizingMask = [.width, .height]
+        imageView.frame = CGRect(origin: .zero, size: scrollView.contentSize)
+        scrollView.documentView = imageView
+
+        context.coordinator.scrollView = scrollView
+
+        NotificationCenter.default.addObserver(
+            context.coordinator,
+            selector: #selector(Coordinator.magnificationDidEnd(_:)),
+            name: NSScrollView.didEndLiveMagnifyNotification,
+            object: scrollView
+        )
+
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let imageView = scrollView.documentView as? ImageDocumentView else { return }
+
+        if imageView.image !== nsImage {
+            imageView.image = nsImage
+            imageView.needsDisplay = true
         }
-        .padding(8)
+
+        // Reset magnification only on file change (zoomScale reset to 1.0 by parent)
+        if zoomScale == 1.0 && scrollView.magnification != 1.0 {
+            scrollView.magnification = 1.0
+        }
+    }
+
+    static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
+        NotificationCenter.default.removeObserver(coordinator)
+    }
+
+    class Coordinator {
+        var parent: ZoomableImageView
+        weak var scrollView: NSScrollView?
+
+        init(parent: ZoomableImageView) {
+            self.parent = parent
+        }
+
+        @objc func magnificationDidEnd(_ notification: Notification) {
+            guard let scrollView else { return }
+            parent.zoomScale = scrollView.magnification
+            parent.steadyZoomScale = scrollView.magnification
+        }
+    }
+}
+
+private class ImageDocumentView: NSView {
+    var image: NSImage
+
+    init(image: NSImage) {
+        self.image = image
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not implemented")
+    }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let imageSize = image.size
+        guard imageSize.width > 0, imageSize.height > 0 else { return }
+
+        let viewSize = bounds.size
+        let scale = min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
+        let scaledSize = NSSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let origin = NSPoint(
+            x: (viewSize.width - scaledSize.width) / 2,
+            y: (viewSize.height - scaledSize.height) / 2
+        )
+
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: NSRect(origin: origin, size: scaledSize))
     }
 }
 
