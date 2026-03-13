@@ -85,7 +85,7 @@ struct DualPaneDragHandle: View {
 struct ContentView: View {
     @State private var fileListVM = FileListViewModel()
     @State private var sidebarVM = SidebarViewModel()
-    @State private var sidebarSelection: URL?
+    @State private var sidebarSelection: URL? = FileManager.default.homeDirectoryForCurrentUser
     @AppStorage("showLeftSidebar") private var showLeftSidebar: Bool = true
     @AppStorage("showRightPanel") private var showRightPanel: Bool = true
     @AppStorage("showBottomPanel") private var showBottomPanel: Bool = false

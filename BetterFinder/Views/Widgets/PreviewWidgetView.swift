@@ -1,8 +1,9 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import PDFKit
+import ImageIO
 
-private enum PreviewContent {
+private enum PreviewContent: @unchecked Sendable {
     case none
     case text(String)
     case image(NSImage)
@@ -19,6 +20,11 @@ struct PreviewWidgetView: View {
     @State private var fileModDate: Date?
     @State private var pollTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
+    @State private var viewSize: CGSize = .zero
+    @State private var loadedMaxDimension: CGFloat = 0
+    @State private var currentImageURL: URL?
+    @State private var zoomScale: CGFloat = 1.0
+    @State private var steadyZoomScale: CGFloat = 1.0
 
     private var isTextContent: Bool {
         if case .text = content { return true }
@@ -53,10 +59,11 @@ struct PreviewWidgetView: View {
                             .scrollContentBackground(.hidden)
                             .padding(4)
                     case .image(let nsImage):
-                        Image(nsImage: nsImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .padding(8)
+                        ZoomableImageView(
+                            nsImage: nsImage,
+                            zoomScale: $zoomScale,
+                            steadyZoomScale: $steadyZoomScale
+                        )
                     case .pdf(let document):
                         PDFKitView(document: document)
                     case .unsupported(let kind):
@@ -69,6 +76,23 @@ struct PreviewWidgetView: View {
                 }
             }
             .frame(maxHeight: .infinity, alignment: .top)
+            .onGeometryChange(for: CGSize.self) { proxy in
+                proxy.size
+            } action: { newSize in
+                let neededMax = max(newSize.width, newSize.height) * 2.0 * zoomScale
+                if neededMax > loadedMaxDimension, currentImageURL != nil {
+                    viewSize = newSize
+                    reloadImageForSize()
+                } else {
+                    viewSize = newSize
+                }
+            }
+            .onChange(of: zoomScale) { _, newZoom in
+                let neededMax = max(viewSize.width, viewSize.height) * 2.0 * newZoom
+                if neededMax > loadedMaxDimension, currentImageURL != nil {
+                    reloadImageForSize()
+                }
+            }
         }
         .frame(maxHeight: .infinity)
         .onAppear { loadPreviewAsync(); startPolling() }
@@ -115,43 +139,109 @@ struct PreviewWidgetView: View {
             content = .none
             editableText = ""
             originalText = ""
+            currentImageURL = nil
+            loadedMaxDimension = 0
+            zoomScale = 1.0
+            steadyZoomScale = 1.0
             return
         }
 
+        if url != currentImageURL {
+            zoomScale = 1.0
+            steadyZoomScale = 1.0
+        }
+
+        // Use 800 default when view hasn't laid out yet, covers most widget sizes at 2x
+        let maxDimension = viewSize == .zero ? 800.0 : max(viewSize.width, viewSize.height) * 2.0
         loadTask = Task {
-            let result = await loadPreviewContent(url: url)
+            let result = await loadPreviewContent(url: url, maxDimension: maxDimension)
             guard !Task.isCancelled else { return }
             content = result.content
             editableText = result.editableText
             originalText = result.originalText
+            currentImageURL = result.isImage ? url : nil
+            loadedMaxDimension = result.isImage ? result.loadedDimension : 0
         }
     }
 
-    private struct PreviewResult {
+    private func reloadImageForSize() {
+        loadTask?.cancel()
+        guard let url = currentImageURL else { return }
+        let maxDimension = max(viewSize.width, viewSize.height) * 2.0 * zoomScale
+
+        loadTask = Task {
+            let result = await Self.loadDownsampledImage(url: url, maxDimension: maxDimension)
+            guard !Task.isCancelled else { return }
+            content = result.content
+            loadedMaxDimension = result.loadedDimension
+        }
+    }
+
+    private struct PreviewResult: Sendable {
         let content: PreviewContent
         let editableText: String
         let originalText: String
+        let isImage: Bool
+        let loadedDimension: CGFloat
+
+        nonisolated init(content: PreviewContent, editableText: String = "", originalText: String = "", isImage: Bool = false, loadedDimension: CGFloat = 0) {
+            self.content = content
+            self.editableText = editableText
+            self.originalText = originalText
+            self.isImage = isImage
+            self.loadedDimension = loadedDimension
+        }
     }
 
-    private func loadPreviewContent(url: URL) async -> PreviewResult {
+    private static func loadDownsampledImage(url: URL, maxDimension: CGFloat) async -> PreviewResult {
+        await Task.detached(priority: .userInitiated) {
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+                return PreviewResult(content: .unsupported("Image"), isImage: true)
+            }
+
+            // Get original image dimensions to avoid upsampling
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+            let pixelWidth = properties?[kCGImagePropertyPixelWidth] as? CGFloat ?? 0
+            let pixelHeight = properties?[kCGImagePropertyPixelHeight] as? CGFloat ?? 0
+            let originalMax = max(pixelWidth, pixelHeight)
+
+            let requestedSize = max(maxDimension, 100)
+            let isFullResolution = originalMax > 0 && requestedSize >= originalMax
+            let thumbnailSize = isFullResolution ? originalMax : requestedSize
+
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: thumbnailSize,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+            ]
+
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                return PreviewResult(content: .unsupported("Image"), isImage: true)
+            }
+
+            let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+            // If at full resolution, report infinity so we never try to reload larger
+            let reportedDimension: CGFloat = isFullResolution ? .greatestFiniteMagnitude : requestedSize
+            return PreviewResult(content: .image(nsImage), isImage: true, loadedDimension: reportedDimension)
+        }.value
+    }
+
+    private func loadPreviewContent(url: URL, maxDimension: CGFloat) async -> PreviewResult {
         await Task.detached(priority: .userInitiated) {
             guard let resourceValues = try? url.resourceValues(forKeys: [.contentTypeKey]),
                   let utType = resourceValues.contentType else {
-                return PreviewResult(content: .unsupported("Unknown"), editableText: "", originalText: "")
+                return PreviewResult(content: .unsupported("Unknown"))
             }
 
             if utType.conforms(to: .pdf) {
                 if let document = PDFDocument(url: url) {
-                    return PreviewResult(content: .pdf(document), editableText: "", originalText: "")
+                    return PreviewResult(content: .pdf(document))
                 } else {
-                    return PreviewResult(content: .unsupported(utType.localizedDescription ?? utType.identifier), editableText: "", originalText: "")
+                    return PreviewResult(content: .unsupported(utType.localizedDescription ?? utType.identifier))
                 }
             } else if utType.conforms(to: .image) {
-                if let nsImage = NSImage(contentsOf: url) {
-                    return PreviewResult(content: .image(nsImage), editableText: "", originalText: "")
-                } else {
-                    return PreviewResult(content: .unsupported(utType.localizedDescription ?? utType.identifier), editableText: "", originalText: "")
-                }
+                return await Self.loadDownsampledImage(url: url, maxDimension: maxDimension)
             } else if utType.conforms(to: .text)
                         || utType.conforms(to: .sourceCode)
                         || utType.conforms(to: .json)
@@ -171,13 +261,13 @@ struct PreviewWidgetView: View {
             let fileSize = attrs[.size] as? Int64 ?? 0
             if fileSize > 100_000 {
                 let sizeStr = ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)
-                return PreviewResult(content: .unsupported("File too large to edit (\(sizeStr))"), editableText: "", originalText: "")
+                return PreviewResult(content: .unsupported("File too large to edit (\(sizeStr))"))
             } else {
                 let text = try String(contentsOf: url, encoding: .utf8)
                 return PreviewResult(content: .text(text), editableText: text, originalText: text)
             }
         } catch {
-            return PreviewResult(content: .unsupported(utType.localizedDescription ?? utType.identifier), editableText: "", originalText: "")
+            return PreviewResult(content: .unsupported(utType.localizedDescription ?? utType.identifier))
         }
     }
 
@@ -202,6 +292,42 @@ struct PreviewWidgetView: View {
 
     private func modificationDate(of url: URL) -> Date? {
         try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+}
+
+private struct ZoomableImageView: View {
+    let nsImage: NSImage
+    @Binding var zoomScale: CGFloat
+    @Binding var steadyZoomScale: CGFloat
+
+    var body: some View {
+        GeometryReader { geo in
+            ScrollView([.horizontal, .vertical]) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(
+                        width: geo.size.width * zoomScale,
+                        height: geo.size.height * zoomScale
+                    )
+                    .frame(
+                        minWidth: geo.size.width,
+                        minHeight: geo.size.height
+                    )
+            }
+            .scrollIndicators(.hidden)
+            .gesture(
+                MagnifyGesture()
+                    .onChanged { value in
+                        zoomScale = max(1.0, steadyZoomScale * value.magnification)
+                    }
+                    .onEnded { value in
+                        zoomScale = max(1.0, steadyZoomScale * value.magnification)
+                        steadyZoomScale = zoomScale
+                    }
+            )
+        }
+        .padding(8)
     }
 }
 

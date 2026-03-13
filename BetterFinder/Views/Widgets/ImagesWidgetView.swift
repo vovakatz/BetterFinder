@@ -8,6 +8,8 @@ struct ImagesWidgetView: View {
     @Binding var widgetType: WidgetType
 
     @State private var imageItems: [FileItem] = []
+    @State private var lastClickURL: URL?
+    @State private var lastClickTime: Date?
 
     private static let resourceKeys: Set<URLResourceKey> = [
         .nameKey,
@@ -33,11 +35,19 @@ struct ImagesWidgetView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 8) {
                         ForEach(imageItems) { item in
                             ImageCell(item: item, isSelected: selectedURLs.contains(item.url))
-                                .onTapGesture(count: 2) {
-                                    NSWorkspace.shared.open(item.url)
-                                }
                                 .onTapGesture {
                                     selectedURLs = [item.url]
+                                    let now = Date()
+                                    if item.url == lastClickURL,
+                                       let last = lastClickTime,
+                                       now.timeIntervalSince(last) < NSEvent.doubleClickInterval {
+                                        NSWorkspace.shared.open(item.url)
+                                        lastClickTime = nil
+                                        lastClickURL = nil
+                                    } else {
+                                        lastClickTime = now
+                                        lastClickURL = item.url
+                                    }
                                 }
                         }
                     }

@@ -80,6 +80,17 @@ final class FileListViewModel {
         }
     }
 
+    // Per-folder hidden files persistence: set of paths where hidden files are shown
+    private static let hiddenFilesDefaultsKey = "folderShowHiddenFiles"
+    private static var folderShowHiddenFiles: Set<String> = {
+        let array = UserDefaults.standard.stringArray(forKey: hiddenFilesDefaultsKey) ?? []
+        return Set(array)
+    }()
+
+    private static func saveFolderShowHiddenFiles() {
+        UserDefaults.standard.set(Array(folderShowHiddenFiles), forKey: hiddenFilesDefaultsKey)
+    }
+
     var volumeStatusText: String {
         if navigationState.isNetworkURL { return "" }
         do {
@@ -158,6 +169,8 @@ final class FileListViewModel {
 
     init(startURL: URL = FileManager.default.homeDirectoryForCurrentUser) {
         self.navigationState = NavigationState(url: startURL)
+        self.sortCriteria = Self.folderSortOrders[startURL.path] ?? .default
+        self.showHiddenFiles = Self.folderShowHiddenFiles.contains(startURL.path)
     }
 
     deinit {
@@ -170,6 +183,7 @@ final class FileListViewModel {
         childItems.removeAll()
         navigationState.navigate(to: url)
         sortCriteria = Self.folderSortOrders[url.path] ?? .default
+        showHiddenFiles = Self.folderShowHiddenFiles.contains(url.path)
         Task { await reload() }
     }
 
@@ -236,6 +250,7 @@ final class FileListViewModel {
     func goBack() {
         if let _ = navigationState.goBack() {
             sortCriteria = Self.folderSortOrders[currentURL.path] ?? .default
+            showHiddenFiles = Self.folderShowHiddenFiles.contains(currentURL.path)
             Task { await reload() }
         }
     }
@@ -243,6 +258,7 @@ final class FileListViewModel {
     func goForward() {
         if let _ = navigationState.goForward() {
             sortCriteria = Self.folderSortOrders[currentURL.path] ?? .default
+            showHiddenFiles = Self.folderShowHiddenFiles.contains(currentURL.path)
             Task { await reload() }
         }
     }
@@ -251,6 +267,18 @@ final class FileListViewModel {
         if let parent = navigationState.parentURL {
             navigate(to: parent)
         }
+    }
+
+    func toggleHiddenFiles() {
+        showHiddenFiles.toggle()
+        let path = currentURL.path
+        if showHiddenFiles {
+            Self.folderShowHiddenFiles.insert(path)
+        } else {
+            Self.folderShowHiddenFiles.remove(path)
+        }
+        Self.saveFolderShowHiddenFiles()
+        Task { await reload() }
     }
 
     func toggleSort(by field: SortField) {
