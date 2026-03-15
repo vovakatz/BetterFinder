@@ -89,7 +89,7 @@ Each pane has its own navigation toolbar with these controls (left to right):
 
 - **Back button** (chevron left) — go to the previous directory in your navigation history. Disabled when there is no history.
 - **Forward button** (chevron right) — go forward after going back. Disabled when there is no forward history.
-- **Breadcrumb path bar** — a scrollable row of clickable path components. Each component represents a directory from the volume root to the current location. Click any component to navigate directly to that directory. The current directory is shown in primary color; ancestor directories are in secondary color.
+- **Breadcrumb path bar** — a scrollable row of clickable path components. Each component represents a directory from the volume root to the current location. Click any component to navigate directly to that directory. The current directory is shown in primary color; ancestor directories are in secondary color. Click the current directory name or the empty area after the breadcrumbs to switch to an editable text field — you can copy the full path or type a new path and press Enter to navigate there. Press Escape or click outside to cancel.
 
 ### Other Ways to Navigate
 

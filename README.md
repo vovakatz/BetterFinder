@@ -33,7 +33,7 @@ A powerful, feature-rich macOS file manager built with SwiftUI. BetterFinder bri
 
 - **Back/Forward history** — full navigation history with back and forward buttons
 - **Parent directory** — navigate up one level
-- **Breadcrumb path bar** — clickable, scrollable path components from volume root to current directory
+- **Breadcrumb path bar** — clickable, scrollable path components from volume root to current directory. Click the current directory or empty area to edit the path directly
 - **Network-aware breadcrumbs** — displays Network > Host > Share > path when inside mounted network shares
 - **Sidebar navigation** — click any sidebar item to navigate instantly
 
