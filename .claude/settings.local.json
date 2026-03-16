@@ -10,7 +10,13 @@
       "Bash(xcodebuild build -scheme BetterFinder -destination 'platform=macOS' 2>&1 | grep -E 'error:|BUILD' | head -10)",
       "WebSearch",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(git -C /Users/vladimirkatz/Dev/BetterFinder status)",
+      "Bash(git -C /Users/vladimirkatz/Dev/BetterFinder diff)",
+      "Bash(git -C /Users/vladimirkatz/Dev/BetterFinder log --oneline -5)",
+      "Bash(git -C /Users/vladimirkatz/Dev/BetterFinder push)",
+      "Bash(./build_and_install.sh 2>&1)",
+      "Bash(./build_and_install.sh:*)"
     ]
   }
 }

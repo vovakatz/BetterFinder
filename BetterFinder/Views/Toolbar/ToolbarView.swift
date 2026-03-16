@@ -23,12 +23,14 @@ struct ToolbarView: View {
         HStack(spacing: 6) {
             Button(action: onGoBack) {
                 Image(systemName: "chevron.left")
+                    .font(.system(size: 14, weight: .bold))
             }
             .buttonStyle(.borderless)
             .disabled(!canGoBack)
 
             Button(action: onGoForward) {
                 Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .bold))
             }
             .buttonStyle(.borderless)
             .disabled(!canGoForward)

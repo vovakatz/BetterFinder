@@ -278,12 +278,18 @@ struct ImageMetadata {
 struct InfoWidgetView: View {
     let selectedURLs: Set<URL>
     @Binding var widgetType: WidgetType
+    // Single-select state
     @State private var metadata: FileMetadata?
     @State private var imageMetadata: ImageMetadata?
-    @State private var calculatedFolderSize: Int64?
-    @State private var isCalculatingSize = false
     @State private var fileModDate: Date?
     @State private var pollTask: Task<Void, Never>?
+    // Multi-select state
+    @State private var expandedURLs: Set<URL> = []
+    @State private var metadataCache: [URL: FileMetadata] = [:]
+    @State private var imageMetadataCache: [URL: ImageMetadata] = [:]
+    // Per-URL folder size
+    @State private var calculatedFolderSizes: [URL: Int64] = [:]
+    @State private var calculatingFolderSizeURLs: Set<URL> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -298,196 +304,286 @@ struct InfoWidgetView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 20)
                 } else if selectedURLs.count > 1 {
-                    Text("\(selectedURLs.count) items selected")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.top, 20)
+                    multiSelectView
                 } else if let meta = metadata {
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 4) {
-                            infoRow("Name", meta.name)
-                            infoRow("Kind", meta.kind)
-                            if !meta.uti.isEmpty {
-                                infoRow("UTI", meta.uti)
-                            }
-                            if let url = selectedURLs.first, url.isDirectory {
-                                folderSizeRow
-                            } else {
-                                infoRow("Size", meta.sizeLogical.formattedFileSize)
-                                HStack(alignment: .top, spacing: 4) {
-                                    Text("")
-                                        .frame(width: 70, alignment: .trailing)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Data: \(meta.sizeLogical) bytes")
-                                        Text("Physical: \(meta.sizePhysical) bytes")
-                                    }
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.secondary)
-                                }
-                            }
-                            if let img = imageMetadata {
-                                Divider().padding(.vertical, 4)
-                                infoRow("Image", img.dimensionSummary)
-                                infoRow("Width", "\(img.pixelWidth) px")
-                                infoRow("Height", "\(img.pixelHeight) px")
-                                if !img.colorModel.isEmpty {
-                                    infoRow("Color", img.colorModel)
-                                }
-                                if !img.colorProfile.isEmpty {
-                                    infoRow("Profile", img.colorProfile)
-                                }
-                                if img.depth > 0 {
-                                    infoRow("Depth", "\(img.depth) bit")
-                                }
-                                if img.hasAlpha {
-                                    infoRow("Alpha", "Yes")
-                                }
-                                if let dpiW = img.dpiWidth, let dpiH = img.dpiHeight {
-                                    if dpiW == dpiH {
-                                        infoRow("DPI", String(format: "%.0f", dpiW))
-                                    } else {
-                                        infoRow("DPI", String(format: "%.0f x %.0f", dpiW, dpiH))
-                                    }
-                                }
-
-                                // Camera / EXIF section
-                                if img.cameraMake != nil || img.cameraModel != nil || img.exposureTime != nil {
-                                    Divider().padding(.vertical, 4)
-                                    if let make = img.cameraMake {
-                                        infoRow("Make", make)
-                                    }
-                                    if let model = img.cameraModel {
-                                        infoRow("Camera", model)
-                                    }
-                                    if let lens = img.lensModel {
-                                        infoRow("Lens", lens)
-                                    }
-                                    if let exp = img.exposureTime {
-                                        infoRow("Exposure", exp)
-                                    }
-                                    if let f = img.fNumber {
-                                        infoRow("Aperture", f)
-                                    }
-                                    if let iso = img.iso {
-                                        infoRow("ISO", iso)
-                                    }
-                                    if let fl = img.focalLength {
-                                        if let fl35 = img.focalLength35mm {
-                                            infoRow("Focal Len", "\(fl) (\(fl35) eq.)")
-                                        } else {
-                                            infoRow("Focal Len", fl)
-                                        }
-                                    }
-                                    if let flash = img.flash {
-                                        infoRow("Flash", flash)
-                                    }
-                                    if let prog = img.exposureProgram {
-                                        infoRow("Program", prog)
-                                    }
-                                    if let metering = img.meteringMode {
-                                        infoRow("Metering", metering)
-                                    }
-                                    if let wb = img.whiteBalance {
-                                        infoRow("White Bal", wb)
-                                    }
-                                    if let bias = img.exposureBias {
-                                        infoRow("Exp Bias", bias)
-                                    }
-                                    if let date = img.dateTaken {
-                                        infoRow("Taken", date)
-                                    }
-                                }
-
-                                // GPS section
-                                if let lat = img.latitude, let lon = img.longitude {
-                                    Divider().padding(.vertical, 4)
-                                    infoRow("Latitude", String(format: "%.6f", lat))
-                                    infoRow("Longitude", String(format: "%.6f", lon))
-                                    if let alt = img.altitude {
-                                        infoRow("Altitude", String(format: "%.1f m", alt))
-                                    }
-                                }
-                            }
-                            Divider().padding(.vertical, 4)
-                            if let d = meta.created {
-                                infoRow("Created", d.fileDateString)
-                            }
-                            if let d = meta.modified {
-                                infoRow("Modified", d.fileDateString)
-                            }
-                            if let d = meta.lastOpened {
-                                infoRow("Opened", d.fileDateString)
-                            }
-                            if let d = meta.added {
-                                infoRow("Added", d.fileDateString)
-                            }
-                            Divider().padding(.vertical, 4)
-                            if !meta.attributes.isEmpty {
-                                infoRow("Attrs", meta.attributes)
-                            }
-                            if !meta.owner.isEmpty {
-                                infoRow("Owner", meta.owner)
-                            }
-                            if !meta.group.isEmpty {
-                                infoRow("Group", meta.group)
-                            }
-                            if !meta.permissions.isEmpty {
-                                infoRow("Perms", meta.permissions)
-                            }
-                            if !meta.application.isEmpty {
-                                infoRow("Opens with", meta.application)
-                            }
-                            infoRow("Path", meta.path)
-                            Divider().padding(.vertical, 4)
-                            if !meta.volumeName.isEmpty {
-                                infoRow("Volume", meta.volumeName)
-                            }
-                            if meta.volumeCapacity > 0 {
-                                infoRow("Capacity", meta.volumeCapacity.formattedFileSize)
-                            }
-                            if meta.volumeFree > 0 {
-                                infoRow("Free", meta.volumeFree.formattedFileSize)
-                            }
-                            if !meta.volumeFormat.isEmpty {
-                                infoRow("Format", meta.volumeFormat)
-                            }
-                            if !meta.mountPoint.isEmpty {
-                                infoRow("Mount", meta.mountPoint)
-                            }
-                            if !meta.device.isEmpty {
-                                infoRow("Device", meta.device)
-                            }
-                        }
+                        metadataDetailView(
+                            url: selectedURLs.first!,
+                            meta: meta,
+                            imageMeta: imageMetadata
+                        )
                         .padding(8)
                     }
                 }
             }
-            .frame(maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { fetchMetadata(); startPolling() }
         .onDisappear { pollTask?.cancel() }
-        .onChange(of: selectedURLs) { _, _ in fetchMetadata(); startPolling() }
+        .onChange(of: selectedURLs) { _, _ in
+            fetchMetadata()
+            startPolling()
+            expandedURLs.formIntersection(selectedURLs)
+            metadataCache.removeAll()
+            imageMetadataCache.removeAll()
+            calculatedFolderSizes.removeAll()
+            calculatingFolderSizeURLs.removeAll()
+        }
         .onChange(of: fileModDate) { _, _ in fetchMetadata() }
     }
 
+    // MARK: - Multi-Select
+
+    private var multiSelectView: some View {
+        let sorted = selectedURLs.sorted {
+            $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending
+        }
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(sorted, id: \.self) { url in
+                    multiSelectItemRow(url)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
     @ViewBuilder
-    private var folderSizeRow: some View {
+    private func multiSelectItemRow(_ url: URL) -> some View {
+        let isExpanded = expandedURLs.contains(url)
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    if isExpanded {
+                        expandedURLs.remove(url)
+                    } else {
+                        expandedURLs.insert(url)
+                        if metadataCache[url] == nil {
+                            metadataCache[url] = FileMetadata.fetch(from: url)
+                            if let contentType = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType,
+                               contentType.conforms(to: .image) {
+                                imageMetadataCache[url] = ImageMetadata.fetch(from: url)
+                            }
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                        .frame(width: 16)
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 16, height: 16)
+                    Text(url.lastPathComponent)
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded, let meta = metadataCache[url] {
+                metadataDetailView(
+                    url: url,
+                    meta: meta,
+                    imageMeta: imageMetadataCache[url]
+                )
+                .padding(.leading, 24)
+                .padding(.trailing, 8)
+                .padding(.bottom, 4)
+            }
+
+            Divider().padding(.horizontal, 8)
+        }
+    }
+
+    // MARK: - Shared Detail View
+
+    @ViewBuilder
+    private func metadataDetailView(url: URL, meta: FileMetadata, imageMeta: ImageMetadata?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            infoRow("Name", meta.name)
+            infoRow("Kind", meta.kind)
+            if !meta.uti.isEmpty {
+                infoRow("UTI", meta.uti)
+            }
+            if url.isDirectory {
+                folderSizeRow(for: url)
+            } else {
+                infoRow("Size", meta.sizeLogical.formattedFileSize)
+                HStack(alignment: .top, spacing: 4) {
+                    Text("")
+                        .frame(width: 70, alignment: .trailing)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Data: \(meta.sizeLogical) bytes")
+                        Text("Physical: \(meta.sizePhysical) bytes")
+                    }
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                }
+            }
+            if let img = imageMeta {
+                Divider().padding(.vertical, 4)
+                infoRow("Image", img.dimensionSummary)
+                infoRow("Width", "\(img.pixelWidth) px")
+                infoRow("Height", "\(img.pixelHeight) px")
+                if !img.colorModel.isEmpty {
+                    infoRow("Color", img.colorModel)
+                }
+                if !img.colorProfile.isEmpty {
+                    infoRow("Profile", img.colorProfile)
+                }
+                if img.depth > 0 {
+                    infoRow("Depth", "\(img.depth) bit")
+                }
+                if img.hasAlpha {
+                    infoRow("Alpha", "Yes")
+                }
+                if let dpiW = img.dpiWidth, let dpiH = img.dpiHeight {
+                    if dpiW == dpiH {
+                        infoRow("DPI", String(format: "%.0f", dpiW))
+                    } else {
+                        infoRow("DPI", String(format: "%.0f x %.0f", dpiW, dpiH))
+                    }
+                }
+
+                // Camera / EXIF section
+                if img.cameraMake != nil || img.cameraModel != nil || img.exposureTime != nil {
+                    Divider().padding(.vertical, 4)
+                    if let make = img.cameraMake {
+                        infoRow("Make", make)
+                    }
+                    if let model = img.cameraModel {
+                        infoRow("Camera", model)
+                    }
+                    if let lens = img.lensModel {
+                        infoRow("Lens", lens)
+                    }
+                    if let exp = img.exposureTime {
+                        infoRow("Exposure", exp)
+                    }
+                    if let f = img.fNumber {
+                        infoRow("Aperture", f)
+                    }
+                    if let iso = img.iso {
+                        infoRow("ISO", iso)
+                    }
+                    if let fl = img.focalLength {
+                        if let fl35 = img.focalLength35mm {
+                            infoRow("Focal Len", "\(fl) (\(fl35) eq.)")
+                        } else {
+                            infoRow("Focal Len", fl)
+                        }
+                    }
+                    if let flash = img.flash {
+                        infoRow("Flash", flash)
+                    }
+                    if let prog = img.exposureProgram {
+                        infoRow("Program", prog)
+                    }
+                    if let metering = img.meteringMode {
+                        infoRow("Metering", metering)
+                    }
+                    if let wb = img.whiteBalance {
+                        infoRow("White Bal", wb)
+                    }
+                    if let bias = img.exposureBias {
+                        infoRow("Exp Bias", bias)
+                    }
+                    if let date = img.dateTaken {
+                        infoRow("Taken", date)
+                    }
+                }
+
+                // GPS section
+                if let lat = img.latitude, let lon = img.longitude {
+                    Divider().padding(.vertical, 4)
+                    infoRow("Latitude", String(format: "%.6f", lat))
+                    infoRow("Longitude", String(format: "%.6f", lon))
+                    if let alt = img.altitude {
+                        infoRow("Altitude", String(format: "%.1f m", alt))
+                    }
+                }
+            }
+            Divider().padding(.vertical, 4)
+            if let d = meta.created {
+                infoRow("Created", d.fileDateString)
+            }
+            if let d = meta.modified {
+                infoRow("Modified", d.fileDateString)
+            }
+            if let d = meta.lastOpened {
+                infoRow("Opened", d.fileDateString)
+            }
+            if let d = meta.added {
+                infoRow("Added", d.fileDateString)
+            }
+            Divider().padding(.vertical, 4)
+            if !meta.attributes.isEmpty {
+                infoRow("Attrs", meta.attributes)
+            }
+            if !meta.owner.isEmpty {
+                infoRow("Owner", meta.owner)
+            }
+            if !meta.group.isEmpty {
+                infoRow("Group", meta.group)
+            }
+            if !meta.permissions.isEmpty {
+                infoRow("Perms", meta.permissions)
+            }
+            if !meta.application.isEmpty {
+                infoRow("Opens with", meta.application)
+            }
+            infoRow("Path", meta.path)
+            Divider().padding(.vertical, 4)
+            if !meta.volumeName.isEmpty {
+                infoRow("Volume", meta.volumeName)
+            }
+            if meta.volumeCapacity > 0 {
+                infoRow("Capacity", meta.volumeCapacity.formattedFileSize)
+            }
+            if meta.volumeFree > 0 {
+                infoRow("Free", meta.volumeFree.formattedFileSize)
+            }
+            if !meta.volumeFormat.isEmpty {
+                infoRow("Format", meta.volumeFormat)
+            }
+            if !meta.mountPoint.isEmpty {
+                infoRow("Mount", meta.mountPoint)
+            }
+            if !meta.device.isEmpty {
+                infoRow("Device", meta.device)
+            }
+        }
+    }
+
+    // MARK: - Folder Size
+
+    @ViewBuilder
+    private func folderSizeRow(for url: URL) -> some View {
         HStack(alignment: .top, spacing: 4) {
             Text("Size")
                 .frame(width: 70, alignment: .trailing)
                 .foregroundStyle(.secondary)
-            if isCalculatingSize {
+            if calculatingFolderSizeURLs.contains(url) {
                 ProgressView()
                     .controlSize(.small)
                     .scaleEffect(0.7)
-            } else if let size = calculatedFolderSize {
+            } else if let size = calculatedFolderSizes[url] {
                 Text(size.formattedFileSize)
                     .textSelection(.enabled)
             } else {
                 Button("Calculate") {
-                    guard let url = selectedURLs.first else { return }
                     calculateFolderSize(url)
                 }
                 .buttonStyle(.link)
@@ -498,12 +594,12 @@ struct InfoWidgetView: View {
     }
 
     private func calculateFolderSize(_ url: URL) {
-        isCalculatingSize = true
+        calculatingFolderSizeURLs.insert(url)
         Task.detached {
             let size = Self.totalSize(of: url)
             await MainActor.run {
-                calculatedFolderSize = size
-                isCalculatingSize = false
+                calculatedFolderSizes[url] = size
+                calculatingFolderSizeURLs.remove(url)
             }
         }
     }
@@ -527,11 +623,10 @@ struct InfoWidgetView: View {
     }
 
     private func fetchMetadata() {
-        calculatedFolderSize = nil
-        isCalculatingSize = false
+        calculatedFolderSizes.removeAll()
+        calculatingFolderSizeURLs.removeAll()
         if selectedURLs.count == 1, let url = selectedURLs.first {
             metadata = FileMetadata.fetch(from: url)
-            // Check if it's an image and fetch image-specific metadata
             if let contentType = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType,
                contentType.conforms(to: .image) {
                 imageMetadata = ImageMetadata.fetch(from: url)

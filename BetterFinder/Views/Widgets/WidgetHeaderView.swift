@@ -37,9 +37,10 @@ struct WidgetHeaderView<LeadingContent: View, ExtraContent: View>: View {
             .padding(.vertical, 6)
             .padding(.horizontal, 8)
             .background(.white, ignoresSafeAreaEdges: [])
+            .frame(maxWidth: .infinity)
             .overlay(alignment: .bottom) {
                 Color(red: 0xE5/255.0, green: 0xE5/255.0, blue: 0xE5/255.0)
-                    .frame(height: 1)
+                    .frame(maxWidth: .infinity, maxHeight: 1)
             }
         }
     }
