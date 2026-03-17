@@ -76,6 +76,11 @@ struct MainContentView: View {
                 pendingCopyNames: viewModel.pendingCopyNames,
                 pendingCopyDestinationName: viewModel.pendingCopyDestinationName,
                 showCopyConfirmation: $viewModel.showCopyConfirmation,
+                showPermissionError: $viewModel.showPermissionError,
+                permissionErrorItemName: viewModel.permissionErrorItemName,
+                onSkipPermissionItem: { viewModel.skipPermissionItem() },
+                onAuthenticatePermissionItem: { viewModel.authenticatePermissionItem() },
+                onStopPermissionOperation: { viewModel.stopPermissionOperation() },
                 selection: $viewModel.selectedItems,
                 showNewFolderSheet: $showNewFolderSheet,
                 showNewFileSheet: $showNewFileSheet

@@ -41,6 +41,13 @@ final class FileListViewModel {
     var showOverwriteConfirmation = false
     var conflictingNames: [String] = []
 
+    // Permission error state (privileged file operations)
+    var showPermissionError = false
+    var permissionErrorItemName: String = ""
+    private var permissionErrorURL: URL?
+    private var remainingTrashItems: [URL] = []
+    private var isPermissionDeletePermanent = false
+
     // Move (drop) state
     var showMoveConfirmation = false
     var pendingMoveURLs: [URL] = []
@@ -674,14 +681,23 @@ final class FileListViewModel {
 
     func moveToTrash(_ urls: Set<URL>) {
         let fm = FileManager.default
-        for url in urls {
+        let urlList = Array(urls)
+        for (index, url) in urlList.enumerated() {
             do {
                 try fm.trashItem(at: url, resultingItemURL: nil)
+                selectedItems.remove(url)
             } catch {
+                if isPermissionError(error) {
+                    permissionErrorURL = url
+                    permissionErrorItemName = url.lastPathComponent
+                    remainingTrashItems = Array(urlList.suffix(from: index + 1))
+                    isPermissionDeletePermanent = false
+                    showPermissionError = true
+                    return
+                }
                 errorMessage = error.localizedDescription
             }
         }
-        selectedItems.subtract(urls)
         Task { await reload() }
     }
 
@@ -692,16 +708,137 @@ final class FileListViewModel {
 
     func confirmDelete() {
         let fm = FileManager.default
-        for url in itemsToDelete {
+        let urlList = Array(itemsToDelete)
+        itemsToDelete.removeAll()
+        for (index, url) in urlList.enumerated() {
             do {
                 try fm.removeItem(at: url)
+                selectedItems.remove(url)
             } catch {
+                if isPermissionError(error) {
+                    permissionErrorURL = url
+                    permissionErrorItemName = url.lastPathComponent
+                    remainingTrashItems = Array(urlList.suffix(from: index + 1))
+                    isPermissionDeletePermanent = true
+                    showPermissionError = true
+                    return
+                }
                 errorMessage = error.localizedDescription
             }
         }
-        selectedItems.subtract(itemsToDelete)
-        itemsToDelete.removeAll()
         Task { await reload() }
+    }
+
+    // MARK: - Privileged File Operations
+
+    func skipPermissionItem() {
+        showPermissionError = false
+        permissionErrorURL = nil
+        if !remainingTrashItems.isEmpty {
+            let remaining = remainingTrashItems
+            remainingTrashItems = []
+            if isPermissionDeletePermanent {
+                itemsToDelete = Set(remaining)
+                confirmDelete()
+            } else {
+                moveToTrash(Set(remaining))
+            }
+        } else {
+            Task { await reload() }
+        }
+    }
+
+    func stopPermissionOperation() {
+        showPermissionError = false
+        permissionErrorURL = nil
+        remainingTrashItems = []
+        Task { await reload() }
+    }
+
+    func authenticatePermissionItem() {
+        guard let url = permissionErrorURL else { return }
+
+        let escapedPath = shellQuote(url.path)
+        let shellCommand: String
+
+        if isPermissionDeletePermanent {
+            shellCommand = "rm -rf \(escapedPath)"
+        } else {
+            let trashDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash")
+            let destURL = uniqueTrashDestination(for: url, in: trashDir)
+            shellCommand = "mv \(escapedPath) \(shellQuote(destURL.path))"
+        }
+
+        let escapedForAppleScript = shellCommand
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let appleScriptSource = "do shell script \"\(escapedForAppleScript)\" with administrator privileges"
+
+        var errorInfo: NSDictionary?
+        let script = NSAppleScript(source: appleScriptSource)
+        script?.executeAndReturnError(&errorInfo)
+
+        if let errorInfo = errorInfo {
+            let errorNumber = errorInfo[NSAppleScript.errorNumber] as? Int
+            if errorNumber != -128 { // -128 = user cancelled
+                errorMessage = errorInfo[NSAppleScript.errorMessage] as? String
+            }
+        } else {
+            selectedItems.remove(url)
+        }
+
+        showPermissionError = false
+        permissionErrorURL = nil
+
+        if !remainingTrashItems.isEmpty {
+            let remaining = remainingTrashItems
+            remainingTrashItems = []
+            if isPermissionDeletePermanent {
+                itemsToDelete = Set(remaining)
+                confirmDelete()
+            } else {
+                moveToTrash(Set(remaining))
+            }
+        } else {
+            Task { await reload() }
+        }
+    }
+
+    private func isPermissionError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain &&
+            (nsError.code == NSFileWriteNoPermissionError || nsError.code == NSFileReadNoPermissionError) {
+            return true
+        }
+        if nsError.domain == NSPOSIXErrorDomain && nsError.code == Int(EACCES) {
+            return true
+        }
+        // Check underlying errors
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
+            if underlying.domain == NSPOSIXErrorDomain && underlying.code == Int(EACCES) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func shellQuote(_ path: String) -> String {
+        return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private func uniqueTrashDestination(for url: URL, in trashDir: URL) -> URL {
+        let name = url.lastPathComponent
+        var dest = trashDir.appendingPathComponent(name)
+        var counter = 1
+        let fm = FileManager.default
+        while fm.fileExists(atPath: dest.path) {
+            let stem = (name as NSString).deletingPathExtension
+            let ext = (name as NSString).pathExtension
+            let newName = ext.isEmpty ? "\(stem) \(counter)" : "\(stem) \(counter).\(ext)"
+            dest = trashDir.appendingPathComponent(newName)
+            counter += 1
+        }
+        return dest
     }
 
     // MARK: - Compress (Zip)

@@ -42,6 +42,13 @@ struct FileListView: View {
     var pendingCopyDestinationName: String = ""
     @Binding var showCopyConfirmation: Bool
 
+    // Permission error
+    @Binding var showPermissionError: Bool
+    var permissionErrorItemName: String = ""
+    var onSkipPermissionItem: () -> Void = {}
+    var onAuthenticatePermissionItem: () -> Void = {}
+    var onStopPermissionOperation: () -> Void = {}
+
     @Binding var selection: Set<FileItem.ID>
     @State private var dateWidth: CGFloat = 150
     @State private var sizeWidth: CGFloat = 80
@@ -162,6 +169,13 @@ struct FileListView: View {
             } message: {
                 let names = pendingCopyNames.joined(separator: ", ")
                 Text("Copy \(names) to \"\(pendingCopyDestinationName)\"?")
+            }
+            .alert("Item is not movable", isPresented: $showPermissionError) {
+                Button("Skip") { onSkipPermissionItem() }
+                Button("Authenticate") { onAuthenticatePermissionItem() }
+                Button("Stop", role: .cancel) { onStopPermissionOperation() }
+            } message: {
+                Text("You don't have sufficient permissions to move the item \"\(permissionErrorItemName)\".")
             }
             .sheet(isPresented: $showNewFolderSheet) {
                 NewItemSheet(title: "New Folder", placeholder: "Folder name") { name in
