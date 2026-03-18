@@ -566,6 +566,7 @@ struct FileListView: View {
     }
 
     private func commitRename(for url: URL) {
+        guard renamingURL != nil else { return }
         let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             onRename(url, trimmed)

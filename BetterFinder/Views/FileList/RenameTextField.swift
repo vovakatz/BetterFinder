@@ -93,6 +93,11 @@ struct RenameTextField: NSViewRepresentable {
             parent.text = field.stringValue
         }
 
+        func controlTextDidEndEditing(_ obj: Notification) {
+            // When the text field loses focus (user clicked elsewhere), commit the rename.
+            parent.onCommit()
+        }
+
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 parent.onCommit()
