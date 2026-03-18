@@ -189,10 +189,7 @@ struct ContentView: View {
                     }
                 }
                 Divider()
-                StatusBarView(
-                    selectionCount: activeVM.selectedItems.count,
-                    volumeStatusText: activeVM.volumeStatusText
-                )
+                StatusBarContainer(viewModel: activeVM)
             }
             .frame(minWidth: 400)
             if showRightPanel {

@@ -61,17 +61,22 @@ struct FileListView: View {
     @State private var renameText = ""
 
     var body: some View {
-        let _ = doubleClickProxy.updateDoubleClickAction { [selection, displayItems, onOpen] in
+        // Capture the Binding (not its value) so closures read current
+        // selection at call time — body may not re-evaluate on selection change.
+        let selBinding = $selection
+        let _ = doubleClickProxy.updateDoubleClickAction { [displayItems, onOpen] in
             doubleClickProxy.cancelPendingRename()
             renamingURL = nil
-            guard let selectedURL = selection.first,
+            let currentSelection = selBinding.wrappedValue
+            guard let selectedURL = currentSelection.first,
                   let displayItem = displayItems.first(where: { $0.id == selectedURL }) else { return }
             onOpen(displayItem.fileItem)
         }
-        let _ = doubleClickProxy.updateSingleClickAction { [selection, displayItems, doubleClickProxy] in
+        let _ = doubleClickProxy.updateSingleClickAction { [displayItems, doubleClickProxy] in
+            let currentSelection = selBinding.wrappedValue
             guard renamingURL == nil,
-                  selection.count == 1,
-                  let url = selection.first,
+                  currentSelection.count == 1,
+                  let url = currentSelection.first,
                   doubleClickProxy.nameHoverURL == url,
                   let item = displayItems.first(where: { $0.id == url }) else { return }
             doubleClickProxy.schedulePendingRename {

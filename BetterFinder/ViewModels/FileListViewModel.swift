@@ -26,9 +26,60 @@ final class FileListViewModel {
     var showHiddenFiles = false
     var expandedFolders: Set<URL> = []
     var childItems: [URL: [FileItem]] = [:]
-    var selectedItems: Set<URL> = []
+    @ObservationIgnored private var _selectedItems: Set<URL> = []
+    @ObservationIgnored private var _selectionCount: Int = 0
+
+    /// Selection count — lightweight property for status bar.
+    /// Tracked separately so that changes don't cascade to the heavy List view.
+    var selectionCount: Int {
+        get {
+            access(keyPath: \.selectionCount)
+            return _selectionCount
+        }
+        set {
+            withMutation(keyPath: \.selectionCount) {
+                _selectionCount = newValue
+            }
+        }
+    }
+
+    /// The current selection. Reading this via the normal getter registers
+    /// @Observable tracking, which is appropriate for widgets that should
+    /// update when the selection changes. For the file list binding, use
+    /// ``selectedItemsUntracked`` to avoid triggering a full List re-render.
+    var selectedItems: Set<URL> {
+        get {
+            access(keyPath: \.selectedItems)
+            return _selectedItems
+        }
+        set {
+            withMutation(keyPath: \.selectedItems) {
+                _selectedItems = newValue
+            }
+            selectionCount = newValue.count
+        }
+    }
+
+    /// Returns the current selection without registering @Observable tracking.
+    /// Used by the List's selection binding to prevent the expensive List body
+    /// from being re-evaluated on every selection change.
+    func selectedItemsUntracked() -> Set<URL> {
+        _selectedItems
+    }
     var viewMode: ViewMode = .list
-    var searchFilter: String = ""
+    @ObservationIgnored private var _searchFilter: String = ""
+    var searchFilter: String {
+        get {
+            access(keyPath: \.searchFilter)
+            return _searchFilter
+        }
+        set {
+            withMutation(keyPath: \.searchFilter) {
+                _searchFilter = newValue
+            }
+            rebuildDisplayItems()
+        }
+    }
 
     // Clipboard & delete state
     var clipboardService: ClipboardService?
@@ -115,21 +166,24 @@ final class FileListViewModel {
         return ""
     }
 
-    var displayItems: [DisplayItem] {
-        let filtered = searchFilter.isEmpty ? items : items.filter { matchesSearch($0.name) }
+    private(set) var displayItems: [DisplayItem] = []
+
+    private func rebuildDisplayItems() {
+        let filter = _searchFilter
+        let filtered = filter.isEmpty ? items : items.filter { matchesSearch($0.name) }
         var result: [DisplayItem] = []
         func addItems(_ items: [FileItem], depth: Int) {
             for item in items {
                 result.append(DisplayItem(fileItem: item, depth: depth))
                 if item.isDirectory, expandedFolders.contains(item.url),
                    let children = childItems[item.url] {
-                    let filteredChildren = searchFilter.isEmpty ? children : children.filter { matchesSearch($0.name) }
+                    let filteredChildren = filter.isEmpty ? children : children.filter { matchesSearch($0.name) }
                     addItems(filteredChildren, depth: depth + 1)
                 }
             }
         }
         addItems(filtered, depth: 0)
-        return result
+        displayItems = result
     }
 
     private func matchesSearch(_ name: String) -> Bool {
@@ -188,6 +242,9 @@ final class FileListViewModel {
     func navigate(to url: URL) {
         expandedFolders.removeAll()
         childItems.removeAll()
+        items = []
+        isLoading = true
+        rebuildDisplayItems()
         navigationState.navigate(to: url)
         sortCriteria = Self.folderSortOrders[url.path] ?? .default
         showHiddenFiles = Self.folderShowHiddenFiles.contains(url.path)
@@ -201,6 +258,7 @@ final class FileListViewModel {
             expandedFolders.insert(item.url)
             Task { await loadChildren(for: item.url) }
         }
+        rebuildDisplayItems()
         updateExpandedMonitors()
     }
 
@@ -216,14 +274,17 @@ final class FileListViewModel {
             case .success:
                 if let creds { storedCredentials[host] = creds }
                 childItems[url] = networkService.sharesAsFileItems(for: host)
+                rebuildDisplayItems()
             case .authRequired:
                 // Need auth to list shares — prompt, then retry
                 pendingAuthHostname = host
                 pendingMountURL = nil
                 showAuthSheet = true
                 expandedFolders.remove(url)
+                rebuildDisplayItems()
             case .error:
                 expandedFolders.remove(url)
+                rebuildDisplayItems()
             }
             return
         }
@@ -233,6 +294,7 @@ final class FileListViewModel {
                 of: url, showHiddenFiles: showHiddenFiles, sortedBy: sortCriteria
             )
             childItems[url] = children
+            rebuildDisplayItems()
         } catch {
             // Silently fail — folder just won't show children
         }
@@ -328,6 +390,7 @@ final class FileListViewModel {
         }
 
         isLoading = false
+        rebuildDisplayItems()
         startMonitoring()
     }
 
@@ -522,6 +585,7 @@ final class FileListViewModel {
                 // Silently ignore
             }
         }
+        rebuildDisplayItems()
     }
 
     // MARK: - Network Mounting
@@ -560,6 +624,7 @@ final class FileListViewModel {
                 isLoading = true
                 await reloadNetwork(credentials: credentials)
                 isLoading = false
+                rebuildDisplayItems()
             }
         } else if let url = pendingMountURL {
             // Auth was for mounting a share

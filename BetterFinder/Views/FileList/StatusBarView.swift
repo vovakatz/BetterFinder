@@ -1,5 +1,18 @@
 import SwiftUI
 
+/// Isolates selectedItems observation from ContentView so that selection
+/// changes only re-evaluate this small view, not the entire layout.
+struct StatusBarContainer: View {
+    var viewModel: FileListViewModel
+
+    var body: some View {
+        StatusBarView(
+            selectionCount: viewModel.selectionCount,
+            volumeStatusText: viewModel.volumeStatusText
+        )
+    }
+}
+
 struct StatusBarView: View {
     let selectionCount: Int
     let volumeStatusText: String
