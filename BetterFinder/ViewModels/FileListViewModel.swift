@@ -375,6 +375,39 @@ final class FileListViewModel {
         return currentURL.standardizedFileURL == trashURL.standardizedFileURL
     }
 
+    @discardableResult
+    func emptyTrash() -> Bool {
+        guard let trashURL = Self.trashURL else {
+            errorMessage = "Trash is unavailable."
+            return false
+        }
+
+        errorMessage = nil
+
+        do {
+            let trashItems = try FileManager.default.contentsOfDirectory(
+                at: trashURL,
+                includingPropertiesForKeys: nil,
+                options: []
+            )
+
+            for url in trashItems {
+                try FileManager.default.removeItem(at: url)
+            }
+
+            return true
+        } catch {
+            errorMessage = "Couldn't empty Trash: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func refreshIfShowingTrash() {
+        guard isTrash else { return }
+        selectedItems.removeAll()
+        Task { await reload() }
+    }
+
     func reload() async {
         refreshDebounceTask?.cancel()
         expandedFolders.removeAll()

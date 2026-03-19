@@ -145,7 +145,11 @@ struct ContentView: View {
     var body: some View {
         HStack(spacing: 0) {
             if showLeftSidebar {
-                SidebarView(viewModel: sidebarVM, selection: $sidebarSelection)
+                SidebarView(
+                    viewModel: sidebarVM,
+                    selection: $sidebarSelection,
+                    onEmptyTrash: { emptyTrash() }
+                )
                     .frame(width: CGFloat(leftSidebarWidth))
                 VerticalDragHandle(width: $leftSidebarWidth, minWidth: 100, maxWidth: 300, leadingEdge: true)
             }
@@ -309,5 +313,10 @@ struct ContentView: View {
             DispatchQueue.main.async { centerPanelHeight = h }
         }
     }
-}
 
+    private func emptyTrash() {
+        guard activeVM.emptyTrash() else { return }
+        fileListVM.refreshIfShowingTrash()
+        secondFileListVM.refreshIfShowingTrash()
+    }
+}

@@ -25,6 +25,8 @@ private struct EjectButton: View {
 struct SidebarView: View {
     let viewModel: SidebarViewModel
     @Binding var selection: URL?
+    var onEmptyTrash: () -> Void = {}
+    @State private var showEmptyTrashConfirmation = false
 
     var body: some View {
         List(selection: $selection) {
@@ -33,6 +35,14 @@ struct SidebarView: View {
                     Label(item.name, systemImage: item.icon)
                         .tag(item.url)
                         .contextMenu {
+                            if item.isTrash {
+                                Button("Empty Trash") {
+                                    showEmptyTrashConfirmation = true
+                                }
+
+                                Divider()
+                            }
+
                             Button("Remove") {
                                 viewModel.removeFavorite(item)
                             }
@@ -63,6 +73,14 @@ struct SidebarView: View {
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
         .background(Color.black.opacity(0.15))
+        .alert("Empty Trash?", isPresented: $showEmptyTrashConfirmation) {
+            Button("Empty Trash", role: .destructive) {
+                onEmptyTrash()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently delete all items in Trash. This action cannot be undone.")
+        }
     }
 
     private func ejectableVolumeRow(_ item: SidebarItem) -> some View {
