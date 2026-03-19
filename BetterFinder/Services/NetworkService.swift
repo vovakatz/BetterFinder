@@ -215,7 +215,8 @@ final class NetworkService {
                 fileSize: 0,
                 dateModified: nil,
                 kind: "Network Computer",
-                icon: icon
+                icon: icon,
+                deferredIconURL: nil
             )
         }
     }
@@ -233,7 +234,8 @@ final class NetworkService {
                 fileSize: 0,
                 dateModified: nil,
                 kind: "Network Share",
-                icon: icon
+                icon: icon,
+                deferredIconURL: nil
             )
         }
     }

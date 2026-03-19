@@ -19,9 +19,7 @@ struct FileThumbnailView: View {
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                 } else {
-                    Image(nsImage: item.icon)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
+                    FileItemIconView(item: item, resolveDeferredIcon: false)
                 }
             }
             .frame(width: 80, height: 80)
@@ -43,7 +41,7 @@ struct FileThumbnailView: View {
             }
 
             if !item.isDirectory {
-                Text(item.fileSize.formattedFileSize)
+                Text(item.fileSizeDisplay)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }

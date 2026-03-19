@@ -88,7 +88,8 @@ struct ImagesWidgetView: View {
                 fileSize: Int64(values.fileSize ?? 0),
                 dateModified: values.contentModificationDate,
                 kind: values.localizedTypeDescription ?? "Image",
-                icon: values.effectiveIcon as? NSImage ?? NSWorkspace.shared.icon(for: .image)
+                icon: values.effectiveIcon as? NSImage ?? NSWorkspace.shared.icon(for: .image),
+                deferredIconURL: nil
             )
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }

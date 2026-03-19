@@ -9,6 +9,7 @@ struct FileRowView: View {
     var isExpanded: Bool = false
     var onToggleExpand: (() -> Void)?
     var isRenaming: Bool = false
+    var resolveDeferredIcon: Bool = true
     @Binding var renameText: String
     var onCommitRename: () -> Void = {}
     var onCancelRename: () -> Void = {}
@@ -33,9 +34,7 @@ struct FileRowView: View {
                     Spacer().frame(width: 16)
                 }
 
-                Image(nsImage: item.icon)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                FileItemIconView(item: item, resolveDeferredIcon: resolveDeferredIcon)
                     .frame(width: 16, height: 16)
 
                 if isRenaming {
@@ -62,7 +61,7 @@ struct FileRowView: View {
 
             Spacer().frame(width: 8)
 
-            Text(item.dateModified?.fileDateString ?? "--")
+            Text(item.dateModifiedDisplay)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .foregroundStyle(.secondary)
@@ -70,7 +69,7 @@ struct FileRowView: View {
 
             Spacer().frame(width: 8)
 
-            Text(item.isDirectory ? "--" : item.fileSize.formattedFileSize)
+            Text(item.fileSizeDisplay)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .foregroundStyle(.secondary)

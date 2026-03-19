@@ -221,7 +221,9 @@ struct FileListView: View {
     }
 
     private func listView(effWidths: (date: CGFloat, size: CGFloat, kind: CGFloat)) -> some View {
-        List(displayItems, selection: $selection) { displayItem in
+        let resolveDeferredIcons = displayItems.count <= 400
+
+        return List(displayItems, selection: $selection) { displayItem in
             FileRowView(
                 item: displayItem.fileItem,
                 dateWidth: effWidths.date,
@@ -231,6 +233,7 @@ struct FileListView: View {
                 isExpanded: expandedFolders.contains(displayItem.fileItem.url),
                 onToggleExpand: { onToggleExpand(displayItem.fileItem) },
                 isRenaming: renamingURL == displayItem.id,
+                resolveDeferredIcon: resolveDeferredIcons,
                 renameText: $renameText,
                 onCommitRename: { commitRename(for: displayItem.id) },
                 onCancelRename: { cancelRename() },
@@ -383,7 +386,10 @@ struct FileListView: View {
 
         if scheme != "network" && scheme != "smb" && scheme != "afp" {
             if !displayItem.fileItem.isDirectory || displayItem.fileItem.isPackage {
-                openWithMenu(for: displayItem.fileItem, targetURLs: targetURLs)
+                Button("Open With...") {
+                    selection = targetURLs
+                    chooseAppAndOpen(Array(targetURLs))
+                }
             }
 
             Button("Show in Finder") {
@@ -457,87 +463,6 @@ struct FileListView: View {
                 onZip(targetURLs)
             }
         }
-    }
-
-    @ViewBuilder
-    private func openWithMenu(for fileItem: FileItem, targetURLs: Set<URL>) -> some View {
-        let appURLs = NSWorkspace.shared.urlsForApplications(toOpen: fileItem.url)
-        let defaultApp = NSWorkspace.shared.urlForApplication(toOpen: fileItem.url)
-        let sorted = appURLs.sorted {
-            if $0 == defaultApp { return true }
-            if $1 == defaultApp { return false }
-            return appDisplayName($0).localizedCaseInsensitiveCompare(appDisplayName($1)) == .orderedAscending
-        }
-
-        Menu("Open With") {
-            ForEach(sorted, id: \.self) { appURL in
-                let name = appDisplayName(appURL)
-                let isDefault = appURL == defaultApp
-                let label = isDefault ? "\(name) (Default)" : name
-                let icon: NSImage = {
-                    let img = NSWorkspace.shared.icon(forFile: appURL.path)
-                    img.size = NSSize(width: 16, height: 16)
-                    return img
-                }()
-                Button {
-                    openFiles(Array(targetURLs), withApp: appURL)
-                } label: {
-                    Label {
-                        Text(label)
-                    } icon: {
-                        Image(nsImage: icon)
-                    }
-                }
-            }
-            if !sorted.isEmpty {
-                Divider()
-            }
-            runningAppsMenu(targetURLs: targetURLs)
-            Button("Other...") {
-                chooseAppAndOpen(Array(targetURLs))
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func runningAppsMenu(targetURLs: Set<URL>) -> some View {
-        let runningApps = NSWorkspace.shared.runningApplications
-            .filter { $0.activationPolicy == .regular && $0.bundleURL != nil }
-            .sorted { ($0.localizedName ?? "").localizedCaseInsensitiveCompare($1.localizedName ?? "") == .orderedAscending }
-
-        Menu("Running") {
-            ForEach(runningApps, id: \.processIdentifier) { app in
-                if let bundleURL = app.bundleURL {
-                    let name = app.localizedName ?? bundleURL.deletingPathExtension().lastPathComponent
-                    let icon: NSImage = {
-                        if let appIcon = app.icon {
-                            appIcon.size = NSSize(width: 16, height: 16)
-                            return appIcon
-                        }
-                        let img = NSWorkspace.shared.icon(forFile: bundleURL.path)
-                        img.size = NSSize(width: 16, height: 16)
-                        return img
-                    }()
-                    Button {
-                        openFiles(Array(targetURLs), withApp: bundleURL)
-                    } label: {
-                        Label {
-                            Text(name)
-                        } icon: {
-                            Image(nsImage: icon)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func appDisplayName(_ appURL: URL) -> String {
-        if let bundle = Bundle(url: appURL),
-           let name = bundle.infoDictionary?["CFBundleDisplayName"] as? String ?? bundle.infoDictionary?["CFBundleName"] as? String {
-            return name
-        }
-        return appURL.deletingPathExtension().lastPathComponent
     }
 
     private func openFiles(_ urls: [URL], withApp appURL: URL) {
@@ -695,9 +620,7 @@ private struct FileDragPreview: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(nsImage: item.icon)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
+            FileItemIconView(item: item, resolveDeferredIcon: false)
                 .frame(width: 16, height: 16)
             Text(item.name)
                 .lineLimit(1)
