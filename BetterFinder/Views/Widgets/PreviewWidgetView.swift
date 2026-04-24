@@ -2,11 +2,13 @@ import SwiftUI
 import UniformTypeIdentifiers
 import PDFKit
 import ImageIO
+import WebKit
 
 private enum PreviewContent: @unchecked Sendable {
     case none
     case text(String)
     case image(NSImage)
+    case svg(URL)
     case pdf(PDFDocument)
     case unsupported(String)
 }
@@ -64,6 +66,8 @@ struct PreviewWidgetView: View {
                             zoomScale: $zoomScale,
                             steadyZoomScale: $steadyZoomScale
                         )
+                    case .svg(let url):
+                        SVGPreviewView(url: url, reloadToken: fileModDate)
                     case .pdf(let document):
                         PDFKitView(document: document)
                     case .unsupported(let kind):
@@ -234,7 +238,9 @@ struct PreviewWidgetView: View {
                 return PreviewResult(content: .unsupported("Unknown"))
             }
 
-            if utType.conforms(to: .pdf) {
+            if Self.isSVG(url: url, utType: utType) {
+                return PreviewResult(content: .svg(url))
+            } else if utType.conforms(to: .pdf) {
                 if let document = PDFDocument(url: url) {
                     return PreviewResult(content: .pdf(document))
                 } else {
@@ -253,6 +259,18 @@ struct PreviewWidgetView: View {
                 return Self.loadTextResult(from: url, utType: utType)
             }
         }.value
+    }
+
+    nonisolated private static func isSVG(url: URL, utType: UTType) -> Bool {
+        if utType.identifier == "public.svg-image" {
+            return true
+        }
+
+        if utType.preferredFilenameExtension?.caseInsensitiveCompare("svg") == .orderedSame {
+            return true
+        }
+
+        return url.pathExtension.caseInsensitiveCompare("svg") == .orderedSame
     }
 
     nonisolated private static func loadTextResult(from url: URL, utType: UTType) -> PreviewResult {
@@ -292,6 +310,49 @@ struct PreviewWidgetView: View {
 
     private func modificationDate(of url: URL) -> Date? {
         try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+}
+
+private struct SVGPreviewView: NSViewRepresentable {
+    let url: URL
+    let reloadToken: Date?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let webView = WKWebView()
+        webView.allowsMagnification = true
+        webView.setValue(false, forKey: "drawsBackground")
+        loadSVG(in: webView, context: context)
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        guard context.coordinator.url != url || context.coordinator.reloadToken != reloadToken else { return }
+        loadSVG(in: webView, context: context)
+    }
+
+    private func loadSVG(in webView: WKWebView, context: Context) {
+        context.coordinator.url = url
+        context.coordinator.reloadToken = reloadToken
+        guard let data = try? Data(contentsOf: url) else {
+            webView.loadHTMLString("<html><body style=\"margin:0;font:12px -apple-system;color:#666;display:flex;align-items:center;justify-content:center;\">Unable to load SVG</body></html>", baseURL: nil)
+            return
+        }
+
+        webView.load(
+            data,
+            mimeType: "image/svg+xml",
+            characterEncodingName: "utf-8",
+            baseURL: url.deletingLastPathComponent()
+        )
+    }
+
+    final class Coordinator {
+        var url: URL?
+        var reloadToken: Date?
     }
 }
 
