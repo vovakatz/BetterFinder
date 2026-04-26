@@ -280,7 +280,7 @@ struct PreviewWidgetView: View {
         do {
             let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
             let fileSize = attrs[.size] as? Int64 ?? 0
-            if fileSize > 100_000 {
+            if fileSize > 1_000_000 {
                 let sizeStr = ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)
                 return PreviewResult(content: .unsupported("File too large to edit (\(sizeStr))"))
             } else {

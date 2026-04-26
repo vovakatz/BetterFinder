@@ -231,16 +231,19 @@ struct ContentView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button { showLeftSidebar.toggle() } label: {
                     Image(systemName: "sidebar.left")
+                        .foregroundStyle(showLeftSidebar ? Color.accentColor : Color.secondary)
                 }
                 .help(showLeftSidebar ? "Hide left sidebar" : "Show left sidebar")
 
                 Button { showBottomPanel.toggle() } label: {
                     Image(systemName: "rectangle.bottomthird.inset.filled")
+                        .foregroundStyle(showBottomPanel ? Color.accentColor : Color.secondary)
                 }
                 .help(showBottomPanel ? "Hide bottom panel" : "Show bottom panel")
 
                 Button { showRightPanel.toggle() } label: {
                     Image(systemName: "sidebar.right")
+                        .foregroundStyle(showRightPanel ? Color.accentColor : Color.secondary)
                 }
                 .help(showRightPanel ? "Hide right panel" : "Show right panel")
                 
