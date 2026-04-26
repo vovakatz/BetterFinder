@@ -15,6 +15,7 @@ struct DisplayItem: Identifiable {
 @Observable
 final class FileListViewModel {
     private let fileSystemService = FileSystemService()
+    private let fileOperationService = FileOperationService()
     let networkService = NetworkService()
 
     private(set) var navigationState: NavigationState
@@ -91,6 +92,7 @@ final class FileListViewModel {
     var itemsToDelete: Set<URL> = []
     var showOverwriteConfirmation = false
     var conflictingNames: [String] = []
+    var fileOperationProgress: FileOperationProgress?
 
     // Permission error state (privileged file operations)
     var showPermissionError = false
@@ -122,6 +124,7 @@ final class FileListViewModel {
     private var directoryMonitors: [URL: DispatchSourceFileSystemObject] = [:]
     private var refreshDebounceTask: Task<Void, Never>?
     private var pollingTask: Task<Void, Never>?
+    private var fileOperationTask: Task<Void, Never>?
 
     // Per-folder sort persistence: path -> SortCriteria
     private static let sortDefaultsKey = "folderSortOrders"
@@ -237,6 +240,7 @@ final class FileListViewModel {
     deinit {
         for source in directoryMonitors.values { source.cancel() }
         pollingTask?.cancel()
+        fileOperationTask?.cancel()
     }
 
     func navigate(to url: URL) {
@@ -755,26 +759,13 @@ final class FileListViewModel {
 
     private func performPaste(overwrite: Bool = false) {
         guard let clipboard else { return }
-        let fm = FileManager.default
-        for sourceURL in clipboard.urls {
-            let destURL = currentURL.appendingPathComponent(sourceURL.lastPathComponent)
-            do {
-                if overwrite && fm.fileExists(atPath: destURL.path) {
-                    try fm.removeItem(at: destURL)
-                }
-                if clipboard.isCut {
-                    try fm.moveItem(at: sourceURL, to: destURL)
-                } else {
-                    try fm.copyItem(at: sourceURL, to: destURL)
-                }
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-        }
-        if clipboard.isCut {
-            clipboardService?.clearCurrent()
-        }
-        Task { await reload() }
+        startFileOperation(
+            urls: Array(clipboard.urls),
+            operation: clipboard.isCut ? .move : .copy,
+            destination: currentURL,
+            overwrite: overwrite,
+            clearCompletedCutItemsFromClipboard: clipboard.isCut
+        )
     }
 
     func moveToTrash(_ urls: Set<URL>) {
@@ -1031,17 +1022,10 @@ final class FileListViewModel {
 
     func confirmMoveItems() {
         let dest = pendingMoveDestination ?? currentURL
-        let fm = FileManager.default
-        for url in pendingMoveURLs {
-            let destURL = dest.appendingPathComponent(url.lastPathComponent)
-            do {
-                try fm.moveItem(at: url, to: destURL)
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-        }
+        let urls = pendingMoveURLs
         pendingMoveURLs = []
         pendingMoveDestination = nil
+        startFileOperation(urls: urls, operation: .move, destination: dest)
     }
 
     // MARK: - Drop/Copy operations (Cmd+Drop)
@@ -1060,16 +1044,80 @@ final class FileListViewModel {
 
     func confirmCopyItems() {
         let dest = pendingCopyDestination ?? currentURL
-        let fm = FileManager.default
-        for url in pendingCopyURLs {
-            let destURL = dest.appendingPathComponent(url.lastPathComponent)
-            do {
-                try fm.copyItem(at: url, to: destURL)
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-        }
+        let urls = pendingCopyURLs
         pendingCopyURLs = []
         pendingCopyDestination = nil
+        startFileOperation(urls: urls, operation: .copy, destination: dest)
+    }
+
+    func cancelFileOperation() {
+        fileOperationTask?.cancel()
+    }
+
+    private func startFileOperation(
+        urls: [URL],
+        operation: FileOperationProgress.Operation,
+        destination: URL,
+        overwrite: Bool = false,
+        clearCompletedCutItemsFromClipboard: Bool = false
+    ) {
+        guard !urls.isEmpty else { return }
+        guard fileOperationTask == nil else {
+            errorMessage = "A file operation is already in progress."
+            return
+        }
+
+        errorMessage = nil
+        let sources = urls.sorted {
+            $0.path.localizedStandardCompare($1.path) == .orderedAscending
+        }
+        let clipboardSnapshot = clipboard
+        let service = fileOperationService
+
+        fileOperationProgress = FileOperationProgress(
+            operation: operation,
+            completedUnitCount: 0,
+            totalUnitCount: 0,
+            currentItemName: nil,
+            statusMessage: "Preparing..."
+        )
+
+        fileOperationTask = Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+
+            let result = service.execute(
+                sources: sources,
+                to: destination,
+                operation: operation,
+                overwrite: overwrite,
+                isCancelled: { Task.isCancelled }
+            ) { progress in
+                DispatchQueue.main.async {
+                    self.fileOperationProgress = progress
+                }
+            }
+
+            await MainActor.run {
+                if clearCompletedCutItemsFromClipboard, let clipboardSnapshot, clipboardSnapshot.isCut {
+                    let remaining = clipboardSnapshot.urls.subtracting(result.completedSources)
+                    if remaining.isEmpty {
+                        self.clipboardService?.clearCurrent()
+                    } else if !result.allSucceeded {
+                        self.clipboardService?.replaceCurrent(urls: remaining)
+                    }
+                }
+
+                self.fileOperationProgress = nil
+                self.fileOperationTask = nil
+
+                if let firstError = result.errors.first, result.completedSources.isEmpty {
+                    self.errorMessage = firstError
+                }
+
+                if !result.completedSources.isEmpty || result.errors.isEmpty {
+                    Task { await self.reload() }
+                }
+            }
+        }
     }
 }

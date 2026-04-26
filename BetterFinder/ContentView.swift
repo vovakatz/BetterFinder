@@ -114,6 +114,17 @@ struct ContentView: View {
         showDualPane && activePaneIsSecond ? secondFileListVM : fileListVM
     }
 
+    private var fileOperationOwner: FileListViewModel? {
+        if activeVM.fileOperationProgress != nil { return activeVM }
+        if fileListVM.fileOperationProgress != nil { return fileListVM }
+        if secondFileListVM.fileOperationProgress != nil { return secondFileListVM }
+        return nil
+    }
+
+    private var currentFileOperationProgress: FileOperationProgress? {
+        fileOperationOwner?.fileOperationProgress
+    }
+
     private var rightTopWidgetBinding: Binding<WidgetType> {
         Binding(
             get: { WidgetType(rawValue: rightTopWidgetRaw) ?? .info },
@@ -218,17 +229,23 @@ struct ContentView: View {
         .toolbarBackground(Color(red: 0xE5/255.0, green: 0xE5/255.0, blue: 0xE5/255.0), for: .windowToolbar)
         .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .toolbar {
-            ToolbarItemGroup(placement: .automatic) {
+            ToolbarItem(placement: .primaryAction) {
+                ToolbarTransferProgressSlot(
+                    progress: currentFileOperationProgress,
+                    onCancel: { fileOperationOwner?.cancelFileOperation() }
+                )
+            }
+            .sharedBackgroundVisibility(.hidden)
+
+            ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     showDualPane.toggle()
                 } label: {
                     Image(systemName: "rectangle.split.2x1")
                         .foregroundStyle(showDualPane ? Color.accentColor : Color.secondary)
                 }
-                .help("Dual Pane")
-            }
-
-            ToolbarItemGroup(placement: .primaryAction) {
+                .help(showDualPane ? "Hide dual pane" : "SHow dual pane")
+                
                 Button { showLeftSidebar.toggle() } label: {
                     Image(systemName: "sidebar.left")
                         .foregroundStyle(showLeftSidebar ? Color.accentColor : Color.secondary)

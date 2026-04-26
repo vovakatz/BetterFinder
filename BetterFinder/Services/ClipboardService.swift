@@ -38,6 +38,17 @@ final class ClipboardService {
         current = nil
     }
 
+    func replaceCurrent(urls: Set<URL>) {
+        guard let current else { return }
+        guard !urls.isEmpty else {
+            self.current = nil
+            return
+        }
+
+        self.current = ClipboardEntry(urls: urls, isCut: current.isCut, timestamp: current.timestamp)
+        syncToPasteboard(urls)
+    }
+
     func removeFromHistory(_ entry: ClipboardEntry) {
         history.removeAll { $0.id == entry.id }
         if current?.id == entry.id {
