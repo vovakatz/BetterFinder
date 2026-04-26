@@ -654,7 +654,7 @@ final class FileListViewModel {
             }
         }
 
-        if let hostname = pendingAuthHostname {
+        if pendingAuthHostname != nil {
             // Auth was for share enumeration
             pendingAuthHostname = nil
             Task {

@@ -16,6 +16,7 @@ enum TerminalTheme: String, CaseIterable, Identifiable {
 
     // MARK: - Apply Theme
 
+    @MainActor
     func apply(to tv: LocalProcessTerminalView) {
         let c = colorData
         tv.installColors(c.ansi.map(Self.makeTermColor))

@@ -604,7 +604,7 @@ struct InfoWidgetView: View {
         }
     }
 
-    private static func totalSize(of url: URL) -> Int64 {
+    nonisolated private static func totalSize(of url: URL) -> Int64 {
         let fm = FileManager.default
         let keys: [URLResourceKey] = [.fileSizeKey, .isDirectoryKey]
         guard let enumerator = fm.enumerator(
