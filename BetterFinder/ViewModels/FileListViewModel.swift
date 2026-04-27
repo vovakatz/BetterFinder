@@ -231,10 +231,13 @@ final class FileListViewModel {
         return currentURL.displayName
     }
 
-    init(startURL: URL = FileManager.default.homeDirectoryForCurrentUser) {
-        self.navigationState = NavigationState(url: startURL)
-        self.sortCriteria = Self.folderSortOrders[startURL.path] ?? .default
-        self.showHiddenFiles = Self.folderShowHiddenFiles.contains(startURL.path)
+    init(startURL: URL? = nil) {
+        let resolvedStart = startURL ?? AppSettings.shared.initialURL()
+        self.navigationState = NavigationState(url: resolvedStart)
+        self.sortCriteria = Self.folderSortOrders[resolvedStart.path] ?? AppSettings.shared.defaultSortCriteria
+        self.showHiddenFiles = Self.folderShowHiddenFiles.contains(resolvedStart.path)
+            ? true
+            : AppSettings.shared.showHiddenFilesByDefault
     }
 
     deinit {
@@ -250,8 +253,10 @@ final class FileListViewModel {
         isLoading = true
         rebuildDisplayItems()
         navigationState.navigate(to: url)
-        sortCriteria = Self.folderSortOrders[url.path] ?? .default
+        sortCriteria = Self.folderSortOrders[url.path] ?? AppSettings.shared.defaultSortCriteria
         showHiddenFiles = Self.folderShowHiddenFiles.contains(url.path)
+            ? true
+            : AppSettings.shared.showHiddenFilesByDefault
         Task { await reload() }
     }
 
@@ -322,16 +327,20 @@ final class FileListViewModel {
 
     func goBack() {
         if let _ = navigationState.goBack() {
-            sortCriteria = Self.folderSortOrders[currentURL.path] ?? .default
+            sortCriteria = Self.folderSortOrders[currentURL.path] ?? AppSettings.shared.defaultSortCriteria
             showHiddenFiles = Self.folderShowHiddenFiles.contains(currentURL.path)
+                ? true
+                : AppSettings.shared.showHiddenFilesByDefault
             Task { await reload() }
         }
     }
 
     func goForward() {
         if let _ = navigationState.goForward() {
-            sortCriteria = Self.folderSortOrders[currentURL.path] ?? .default
+            sortCriteria = Self.folderSortOrders[currentURL.path] ?? AppSettings.shared.defaultSortCriteria
             showHiddenFiles = Self.folderShowHiddenFiles.contains(currentURL.path)
+                ? true
+                : AppSettings.shared.showHiddenFilesByDefault
             Task { await reload() }
         }
     }

@@ -85,7 +85,7 @@ struct DualPaneDragHandle: View {
 struct ContentView: View {
     @State private var fileListVM = FileListViewModel()
     @State private var sidebarVM = SidebarViewModel()
-    @State private var sidebarSelection: URL? = FileManager.default.homeDirectoryForCurrentUser
+    @State private var sidebarSelection: URL? = AppSettings.shared.initialURL()
     @AppStorage("showLeftSidebar") private var showLeftSidebar: Bool = true
     @AppStorage("showRightPanel") private var showRightPanel: Bool = true
     @AppStorage("showBottomPanel") private var showBottomPanel: Bool = false
@@ -290,6 +290,9 @@ struct ContentView: View {
                 searchText = ""
                 secondFileListVM.searchFilter = ""
             }
+        }
+        .onChange(of: activeVM.currentURL) { _, newURL in
+            AppSettings.shared.lastLocationPath = newURL.path
         }
         .onChange(of: showDualPane) { _, isShowing in
             if isShowing {

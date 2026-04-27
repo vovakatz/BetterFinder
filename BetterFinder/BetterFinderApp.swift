@@ -36,6 +36,10 @@ struct BetterFinderApp: App {
                 .keyboardShortcut("a", modifiers: .command)
             }
         }
+
+        Settings {
+            SettingsView()
+        }
     }
 }
 
