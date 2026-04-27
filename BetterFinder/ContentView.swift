@@ -293,6 +293,7 @@ struct ContentView: View {
         }
         .onChange(of: activeVM.currentURL) { _, newURL in
             AppSettings.shared.lastLocationPath = newURL.path
+            sidebarSelection = matchingSidebarURL(for: newURL)
         }
         .onChange(of: showDualPane) { _, isShowing in
             if isShowing {
@@ -328,6 +329,23 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .connectToServer)) { _ in
             fileListVM.showConnectToServer = true
+        }
+        .onOpenURL { url in
+            guard url.isFileURL else { return }
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else { return }
+            activeVM.navigate(to: url)
+        }
+    }
+
+    private func matchingSidebarURL(for url: URL) -> URL? {
+        let target = url.standardizedFileURL.resolvingSymlinksInPath().path
+        let candidates = sidebarVM.favorites.map(\.url)
+            + sidebarVM.localVolumes.map(\.url)
+            + sidebarVM.networkVolumes.map(\.url)
+        return candidates.first { candidate in
+            guard candidate.isFileURL else { return false }
+            return candidate.standardizedFileURL.resolvingSymlinksInPath().path == target
         }
     }
 
