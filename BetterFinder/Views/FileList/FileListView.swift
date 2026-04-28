@@ -49,7 +49,10 @@ struct FileListView: View {
     var onAuthenticatePermissionItem: () -> Void = {}
     var onStopPermissionOperation: () -> Void = {}
 
+    var currentFolderURL: URL
+
     @Binding var selection: Set<FileItem.ID>
+    private let terminalLauncher = TerminalLauncherService()
     @State private var dateWidth: CGFloat = 150
     @State private var sizeWidth: CGFloat = 80
     @State private var kindWidth: CGFloat = 120
@@ -360,6 +363,12 @@ struct FileListView: View {
             newItemName = ""
             showNewFileSheet = true
         }
+        if !isNetworkContext {
+            Divider()
+            Button("Open in Terminal") {
+                terminalLauncher.openTerminal(at: currentFolderURL)
+            }
+        }
         if canPaste {
             Divider()
             Button("Paste") {
@@ -395,6 +404,18 @@ struct FileListView: View {
             Button("Show in Finder") {
                 selection = targetURLs
                 NSWorkspace.shared.activateFileViewerSelecting([displayItem.fileItem.url])
+            }
+
+            Button("Open in Terminal") {
+                let item = displayItem.fileItem
+                if item.isDirectory && !item.isPackage {
+                    terminalLauncher.openTerminal(at: item.url)
+                } else {
+                    terminalLauncher.openTerminal(
+                        at: item.url.deletingLastPathComponent(),
+                        prefilledFilename: item.url.lastPathComponent
+                    )
+                }
             }
 
             Menu("Copy Path/Reference") {

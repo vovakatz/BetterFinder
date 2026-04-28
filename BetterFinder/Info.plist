@@ -30,6 +30,8 @@
 	<string>BetterFinder needs access to your Documents folder to browse and manage files.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>BetterFinder needs access to your Downloads folder to browse and manage files.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>BetterFinder uses System Events to type filenames into Terminal windows when you choose "Open in Terminal" on a file.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
 	<key>CFBundleDocumentTypes</key>

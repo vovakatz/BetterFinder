@@ -27,6 +27,7 @@ final class AppSettings {
         static let customDefaultLocationPath = "settings.general.customDefaultLocationPath"
         static let lastLocationPath = "settings.general.lastLocationPath"
         static let defaultSortCriteria = "settings.general.defaultSortCriteria"
+        static let terminalBundleID = "settings.general.terminalBundleID"
     }
 
     var showHiddenFilesByDefault: Bool {
@@ -53,6 +54,10 @@ final class AppSettings {
         }
     }
 
+    var terminalBundleID: String {
+        didSet { UserDefaults.standard.set(terminalBundleID, forKey: Keys.terminalBundleID) }
+    }
+
     private init() {
         let defaults = UserDefaults.standard
 
@@ -74,6 +79,9 @@ final class AppSettings {
         } else {
             self.defaultSortCriteria = .default
         }
+
+        let storedTerminal = defaults.string(forKey: Keys.terminalBundleID) ?? ""
+        self.terminalBundleID = storedTerminal.isEmpty ? TerminalAppOption.defaultBundleID : storedTerminal
     }
 
     /// Returns the URL a fresh pane should open to, based on `defaultLocation`.

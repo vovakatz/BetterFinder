@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct GeneralSettingsView: View {
     @State private var settings = AppSettings.shared
@@ -7,6 +8,8 @@ struct GeneralSettingsView: View {
     @State private var launchAtLoginErrorMessage: String?
     @State private var isDefaultFolderHandler: Bool = DefaultFolderHandlerService.isDefault
     @State private var defaultHandlerErrorMessage: String?
+    @State private var installedTerminals: [TerminalAppOption] = TerminalAppOption.installedCurated()
+    @State private var customTerminal: TerminalAppOption?
 
     var body: some View {
         Form {
@@ -48,6 +51,20 @@ struct GeneralSettingsView: View {
                 }
             }
 
+            Section("Terminal") {
+                Picker("Open in Terminal uses:", selection: $settings.terminalBundleID) {
+                    ForEach(terminalPickerOptions) { term in
+                        Text(term.displayName).tag(term.bundleID)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                HStack {
+                    Spacer()
+                    Button("Choose Other Application…") { chooseCustomTerminal() }
+                }
+            }
+
             Section {
                 Picker("Sort by:", selection: $settings.defaultSortCriteria.field) {
                     Text("Name").tag(SortField.name)
@@ -82,6 +99,7 @@ struct GeneralSettingsView: View {
         .onAppear {
             launchAtLogin = LaunchAtLoginService.isEnabled
             isDefaultFolderHandler = DefaultFolderHandlerService.isDefault
+            refreshTerminalState()
         }
         .onChange(of: launchAtLogin) { _, newValue in
             do {
@@ -130,6 +148,46 @@ struct GeneralSettingsView: View {
         if path == home { return "~" }
         if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
         return path
+    }
+
+    private var terminalPickerOptions: [TerminalAppOption] {
+        var options = installedTerminals
+        if let custom = customTerminal,
+           !options.contains(where: { $0.bundleID == custom.bundleID }) {
+            options.append(custom)
+        }
+        return options
+    }
+
+    private func refreshTerminalState() {
+        installedTerminals = TerminalAppOption.installedCurated()
+        let current = settings.terminalBundleID
+        if installedTerminals.contains(where: { $0.bundleID == current }) {
+            customTerminal = nil
+            return
+        }
+        if let resolved = TerminalAppOption.resolve(bundleID: current) {
+            customTerminal = resolved
+        } else {
+            customTerminal = nil
+            settings.terminalBundleID = TerminalAppOption.defaultBundleID
+        }
+    }
+
+    private func chooseCustomTerminal() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.applicationBundle]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        guard panel.runModal() == .OK,
+              let url = panel.url,
+              let bundleID = Bundle(url: url)?.bundleIdentifier,
+              let resolved = TerminalAppOption.resolve(bundleID: bundleID)
+        else { return }
+        customTerminal = resolved
+        settings.terminalBundleID = bundleID
     }
 
     private func chooseCustomFolder() {

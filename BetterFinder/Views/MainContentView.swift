@@ -143,6 +143,7 @@ private struct StableFileList: View, Equatable {
             onSkipPermissionItem: { viewModel.skipPermissionItem() },
             onAuthenticatePermissionItem: { viewModel.authenticatePermissionItem() },
             onStopPermissionOperation: { viewModel.stopPermissionOperation() },
+            currentFolderURL: viewModel.currentURL,
             selection: selectionBinding,
             showNewFolderSheet: $showNewFolderSheet,
             showNewFileSheet: $showNewFileSheet
