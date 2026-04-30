@@ -254,9 +254,6 @@ struct FileListView: View {
             }
             .itemDropDestination(item: displayItem, onDropIntoFolder: onDropIntoFolder, onDrop: onDrop)
             .tag(displayItem.id)
-            .contextMenu {
-                contextMenuContent(for: displayItem)
-            }
         }
         .listStyle(.plain)
         .alternatingRowBackgrounds()
@@ -283,7 +280,13 @@ struct FileListView: View {
         .onPasteCommand(of: [.fileURL]) { _ in
             onPaste()
         }
-        .contextMenu { backgroundContextMenu }
+        .contextMenu(forSelectionType: FileItem.ID.self) { selectedIDs in
+            if selectedIDs.isEmpty {
+                backgroundContextMenu
+            } else {
+                contextMenuContent(forSelection: selectedIDs)
+            }
+        }
         .onChange(of: selection) { _, newValue in
             doubleClickProxy.cancelPendingRename()
             if let renaming = renamingURL, !newValue.contains(renaming) {
@@ -316,7 +319,8 @@ struct FileListView: View {
                     .itemDropDestination(item: displayItem, onDropIntoFolder: onDropIntoFolder, onDrop: onDrop)
                     .tag(displayItem.id)
                     .contextMenu {
-                        contextMenuContent(for: displayItem)
+                        let targets: Set<FileItem.ID> = selection.contains(displayItem.id) ? selection : [displayItem.id]
+                        contextMenuContent(forSelection: targets)
                     }
                 }
             }
@@ -384,17 +388,25 @@ struct FileListView: View {
     }
 
     @ViewBuilder
-    private func contextMenuContent(for displayItem: DisplayItem) -> some View {
-        let targetURLs = selection.contains(displayItem.id) ? selection : [displayItem.id]
-        let scheme = displayItem.fileItem.url.scheme
+    private func contextMenuContent(forSelection selectedIDs: Set<FileItem.ID>) -> some View {
+        let targetURLs = selectedIDs
+        let selectedItems = displayItems.filter { selectedIDs.contains($0.id) }
+        let primaryItem = selectedItems.first?.fileItem
+        let scheme = primaryItem?.url.scheme
+        let isSingle = selectedIDs.count == 1
 
         Button("Open") {
             selection = targetURLs
-            onOpen(displayItem.fileItem)
+            for displayItem in selectedItems {
+                onOpen(displayItem.fileItem)
+            }
         }
 
         if scheme != "network" && scheme != "smb" && scheme != "afp" {
-            if !displayItem.fileItem.isDirectory || displayItem.fileItem.isPackage {
+            let hasOpenable = selectedItems.contains {
+                !$0.fileItem.isDirectory || $0.fileItem.isPackage
+            }
+            if hasOpenable {
                 Button("Open With...") {
                     selection = targetURLs
                     chooseAppAndOpen(Array(targetURLs))
@@ -403,45 +415,46 @@ struct FileListView: View {
 
             Button("Show in Finder") {
                 selection = targetURLs
-                NSWorkspace.shared.activateFileViewerSelecting([displayItem.fileItem.url])
+                NSWorkspace.shared.activateFileViewerSelecting(Array(targetURLs))
             }
 
-            Button("Open in Terminal") {
-                let item = displayItem.fileItem
-                if item.isDirectory && !item.isPackage {
-                    terminalLauncher.openTerminal(at: item.url)
-                } else {
-                    terminalLauncher.openTerminal(
-                        at: item.url.deletingLastPathComponent(),
-                        prefilledFilename: item.url.lastPathComponent
-                    )
+            if isSingle, let item = primaryItem {
+                Button("Open in Terminal") {
+                    if item.isDirectory && !item.isPackage {
+                        terminalLauncher.openTerminal(at: item.url)
+                    } else {
+                        terminalLauncher.openTerminal(
+                            at: item.url.deletingLastPathComponent(),
+                            prefilledFilename: item.url.lastPathComponent
+                        )
+                    }
                 }
-            }
 
-            Menu("Copy Path/Reference") {
-                Button("Item Name") {
-                    copyToPasteboard(displayItem.fileItem.name)
+                Menu("Copy Path/Reference") {
+                    Button("Item Name") {
+                        copyToPasteboard(item.name)
+                    }
+                    Button("Path from Root") {
+                        copyToPasteboard(item.url.path(percentEncoded: false))
+                    }
+                    let fullPath = item.url.path(percentEncoded: false)
+                    let homePath = FileManager.default.homeDirectoryForCurrentUser.path(percentEncoded: false)
+                    let isUnderHome = fullPath.hasPrefix(homePath)
+                    Button("Path from Home Dir") {
+                        let relative = String(fullPath.dropFirst(homePath.count))
+                        let trimmed = relative.hasPrefix("/") ? String(relative.dropFirst()) : relative
+                        copyToPasteboard("~/\(trimmed)")
+                    }
+                    .disabled(!isUnderHome)
                 }
-                Button("Path from Root") {
-                    copyToPasteboard(displayItem.fileItem.url.path(percentEncoded: false))
-                }
-                let fullPath = displayItem.fileItem.url.path(percentEncoded: false)
-                let homePath = FileManager.default.homeDirectoryForCurrentUser.path(percentEncoded: false)
-                let isUnderHome = fullPath.hasPrefix(homePath)
-                Button("Path from Home Dir") {
-                    let relative = String(fullPath.dropFirst(homePath.count))
-                    let trimmed = relative.hasPrefix("/") ? String(relative.dropFirst()) : relative
-                    copyToPasteboard("~/\(trimmed)")
-                }
-                .disabled(!isUnderHome)
-            }
 
-            Divider()
+                Divider()
 
-            Button("Rename") {
-                selection = [displayItem.id]
-                renamingURL = displayItem.id
-                renameText = displayItem.fileItem.name
+                Button("Rename") {
+                    selection = [item.url]
+                    renamingURL = item.url
+                    renameText = item.name
+                }
             }
 
             Divider()
