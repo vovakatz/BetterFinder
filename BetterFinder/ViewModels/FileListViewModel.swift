@@ -6,6 +6,11 @@ enum ViewMode {
     case thumbnails
 }
 
+enum FileListMode: Equatable {
+    case directory(URL)
+    case tagQuery(FileTag)
+}
+
 struct DisplayItem: Identifiable {
     let fileItem: FileItem
     let depth: Int
@@ -17,7 +22,10 @@ final class FileListViewModel {
     private let fileSystemService = FileSystemService()
     private let fileOperationService = FileOperationService()
     let networkService = NetworkService()
+    private let tagQueryService = TagQueryService()
+    private let xattrObserver = TagFSEventsObserver()
 
+    var mode: FileListMode = .directory(URL(fileURLWithPath: NSHomeDirectory()))
     private(set) var navigationState: NavigationState
     private(set) var items: [FileItem] = []
     private(set) var isLoading = false
@@ -234,19 +242,35 @@ final class FileListViewModel {
     init(startURL: URL? = nil) {
         let resolvedStart = startURL ?? AppSettings.shared.initialURL()
         self.navigationState = NavigationState(url: resolvedStart)
+        self.mode = .directory(resolvedStart)
         self.sortCriteria = Self.folderSortOrders[resolvedStart.path] ?? AppSettings.shared.defaultSortCriteria
         self.showHiddenFiles = Self.folderShowHiddenFiles.contains(resolvedStart.path)
             ? true
             : AppSettings.shared.showHiddenFilesByDefault
+        setupXattrObserver()
+        xattrObserver.start(watching: resolvedStart)
+    }
+
+    private func setupXattrObserver() {
+        xattrObserver.onXattrChange = { [weak self] url in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.refreshTags(for: [url])
+            }
+        }
     }
 
     deinit {
         for source in directoryMonitors.values { source.cancel() }
         pollingTask?.cancel()
         fileOperationTask?.cancel()
+        xattrObserver.stop()
     }
 
     func navigate(to url: URL) {
+        tagQueryService.stop()
+        mode = .directory(url)
+        xattrObserver.start(watching: url)
         expandedFolders.removeAll()
         childItems.removeAll()
         items = []
@@ -258,6 +282,44 @@ final class FileListViewModel {
             ? true
             : AppSettings.shared.showHiddenFilesByDefault
         Task { await reload() }
+    }
+
+    @MainActor
+    func openTagQuery(_ tag: FileTag) {
+        // Stop any prior query.
+        tagQueryService.stop()
+        xattrObserver.stop()
+
+        // Stop the directory monitor and polling task for the previous
+        // directory — otherwise their refreshItems() callback will
+        // overwrite the tag-query results with the directory contents.
+        stopAllMonitors()
+
+        mode = .tagQuery(tag)
+        items = []
+        isLoading = true
+        errorMessage = nil
+        selectedItems = []
+
+        tagQueryService.onUpdate = { [weak self] newItems in
+            guard let self else { return }
+            self.items = newItems
+            self.rebuildDisplayItems()
+            self.isLoading = false
+        }
+        tagQueryService.onGatheringFinished = { [weak self] in
+            self?.isLoading = false
+        }
+
+        tagQueryService.start(for: tag)
+    }
+
+    /// Exits tag-query mode and reloads the directory the user was on
+    /// when the tag query was opened.
+    @MainActor
+    func closeTagQuery() {
+        guard case .tagQuery = mode else { return }
+        navigate(to: navigationState.currentURL)
     }
 
     func toggleExpanded(_ item: FileItem) {
@@ -500,6 +562,7 @@ final class FileListViewModel {
     // MARK: - Directory Monitoring
 
     private func startMonitoring() {
+        if case .tagQuery = mode { return }
         stopAllMonitors()
         guard currentURL.isFileURL else { return }
         addMonitor(for: currentURL)
@@ -567,6 +630,7 @@ final class FileListViewModel {
     }
 
     private func refreshIfChanged() async {
+        if case .tagQuery = mode { return }
         guard currentURL.isFileURL else { return }
         // Build lookup of cached modification dates from items and all expanded childItems
         var cachedModDates: [URL: Date] = [:]
@@ -610,6 +674,7 @@ final class FileListViewModel {
     }
 
     private func refreshItems() async {
+        if case .tagQuery = mode { return }
         guard currentURL.isFileURL else { return }
         do {
             let loaded = try await fileSystemService.loadContents(
@@ -1127,6 +1192,70 @@ final class FileListViewModel {
                     Task { await self.reload() }
                 }
             }
+        }
+    }
+
+    /// Re-reads tag values for a subset of URLs and updates `items` in
+    /// place. Used after a local tag write to avoid a full directory
+    /// reload.
+    @MainActor
+    func refreshTags(for urls: Set<URL>) async {
+        var changed = false
+        for url in urls {
+            let newTags = TagService.shared.tags(for: url)
+
+            if let index = items.firstIndex(where: { $0.id == url }) {
+                let existing = items[index]
+                if newTags != existing.tags {
+                    items[index] = Self.replacingTags(in: existing, with: newTags)
+                    changed = true
+                }
+            }
+
+            for (parent, children) in childItems {
+                guard let childIndex = children.firstIndex(where: { $0.id == url }) else { continue }
+                let existing = children[childIndex]
+                guard newTags != existing.tags else { continue }
+                var updated = children
+                updated[childIndex] = Self.replacingTags(in: existing, with: newTags)
+                childItems[parent] = updated
+                changed = true
+            }
+        }
+        if changed { rebuildDisplayItems() }
+    }
+
+    private static func replacingTags(in existing: FileItem, with newTags: [FileTag]) -> FileItem {
+        FileItem(
+            id: existing.id,
+            name: existing.name,
+            isDirectory: existing.isDirectory,
+            isPackage: existing.isPackage,
+            isHidden: existing.isHidden,
+            fileSize: existing.fileSize,
+            dateModified: existing.dateModified,
+            kind: existing.kind,
+            icon: existing.icon,
+            deferredIconURL: existing.deferredIconURL,
+            dateModifiedDisplay: existing.dateModifiedDisplay,
+            fileSizeDisplay: existing.fileSizeDisplay,
+            tags: newTags
+        )
+    }
+
+    /// Toggles a tag across the given URLs and refreshes the affected
+    /// `items` rows in place. On error, surfaces the message via
+    /// `errorMessage` and still refreshes the URLs that did succeed.
+    @MainActor
+    func toggleTagOnSelection(_ tag: FileTag, on urls: Set<URL>) async {
+        do {
+            try TagService.shared.toggle(tag, on: Array(urls))
+            await refreshTags(for: urls)
+        } catch let error as TagWriteError {
+            errorMessage = error.localizedDescription
+            await refreshTags(for: Set(error.successes))
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 }

@@ -159,7 +159,13 @@ struct ContentView: View {
                 SidebarView(
                     viewModel: sidebarVM,
                     selection: $sidebarSelection,
-                    onEmptyTrash: { emptyTrash() }
+                    onEmptyTrash: { emptyTrash() },
+                    onTagReclick: { _ in
+                        Task { @MainActor in
+                            activeVM.closeTagQuery()
+                            sidebarSelection = matchingSidebarURL(for: activeVM.currentURL)
+                        }
+                    }
                 )
                     .frame(width: CGFloat(leftSidebarWidth))
                 VerticalDragHandle(width: $leftSidebarWidth, minWidth: 100, maxWidth: 300, leadingEdge: true)
@@ -295,6 +301,11 @@ struct ContentView: View {
             AppSettings.shared.lastLocationPath = newURL.path
             sidebarSelection = matchingSidebarURL(for: newURL)
         }
+        .onChange(of: activeVM.mode) { _, newMode in
+            if case .directory = newMode {
+                sidebarSelection = matchingSidebarURL(for: activeVM.currentURL)
+            }
+        }
         .onChange(of: showDualPane) { _, isShowing in
             if isShowing {
                 Task { await secondFileListVM.reload() }
@@ -303,7 +314,12 @@ struct ContentView: View {
             }
         }
         .onChange(of: sidebarSelection) { _, newURL in
-            if let url = newURL {
+            guard let url = newURL else { return }
+            if let tagName = TagSidebarURL.tagName(from: url) {
+                let known = TagService.shared.availableTags.first { $0.name == tagName }
+                let tag = known ?? FileTag(name: tagName, color: .none)
+                Task { @MainActor in activeVM.openTagQuery(tag) }
+            } else {
                 activeVM.navigate(to: url)
             }
         }

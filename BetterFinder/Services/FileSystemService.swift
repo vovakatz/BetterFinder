@@ -10,6 +10,7 @@ struct FileSystemService {
         .fileSizeKey,
         .contentModificationDateKey,
         .localizedTypeDescriptionKey,
+        .tagNamesKey,
     ]
 
     private struct LoadedFileMetadata: Sendable {
@@ -21,6 +22,7 @@ struct FileSystemService {
         let fileSize: Int64
         let dateModified: Date?
         let kind: String
+        let tagNames: [String]
     }
 
     func loadContents(
@@ -53,7 +55,8 @@ struct FileSystemService {
                 dateModified: item.dateModified,
                 kind: item.kind,
                 icon: FileIconProvider.shared.placeholderIcon(isDirectory: item.isDirectory),
-                deferredIconURL: item.url
+                deferredIconURL: item.url,
+                tags: TagService.shared.resolve(names: item.tagNames)
             )
         }
     }
@@ -84,7 +87,8 @@ struct FileSystemService {
                 isHidden: values.isHidden ?? false,
                 fileSize: Int64(values.fileSize ?? 0),
                 dateModified: values.contentModificationDate,
-                kind: values.localizedTypeDescription ?? "Unknown"
+                kind: values.localizedTypeDescription ?? "Unknown",
+                tagNames: values.tagNames ?? []
             )
         }
 

@@ -10,6 +10,10 @@ struct ColumnHeaderView: View {
     var effectiveDateWidth: CGFloat = 150
     var effectiveSizeWidth: CGFloat = 80
     var effectiveKindWidth: CGFloat = 120
+    /// Leading/trailing padding to align with row content. Should equal the
+    /// total visual leading offset of List rows (List intrinsic inset +
+    /// `.listRowInsets(.leading)`). See `FileListLayout` in `FileListView.swift`.
+    var horizontalPadding: CGFloat = 8
 
     @State private var startWidths: (date: CGFloat, size: CGFloat, kind: CGFloat)?
 
@@ -47,7 +51,7 @@ struct ColumnHeaderView: View {
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(.secondary)
         .padding(.vertical, 4)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, horizontalPadding)
         .background(Color(nsColor: .controlBackgroundColor))
     }
 

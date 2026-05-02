@@ -14,6 +14,7 @@ struct FileItem: Identifiable {
     let deferredIconURL: URL?
     let dateModifiedDisplay: String
     let fileSizeDisplay: String
+    let tags: [FileTag]
 
     var url: URL { id }
 
@@ -37,7 +38,8 @@ struct FileItem: Identifiable {
         icon: NSImage,
         deferredIconURL: URL? = nil,
         dateModifiedDisplay: String? = nil,
-        fileSizeDisplay: String? = nil
+        fileSizeDisplay: String? = nil,
+        tags: [FileTag] = []
     ) {
         self.id = id
         self.name = name
@@ -54,6 +56,7 @@ struct FileItem: Identifiable {
             return Self.dateFormatter.string(from: dateModified)
         }()
         self.fileSizeDisplay = fileSizeDisplay ?? (isDirectory ? "--" : ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file))
+        self.tags = tags
     }
 }
 
@@ -62,6 +65,7 @@ extension FileItem: Equatable {
         lhs.id == rhs.id
             && lhs.fileSize == rhs.fileSize
             && lhs.dateModified == rhs.dateModified
+            && lhs.tags == rhs.tags
     }
 }
 

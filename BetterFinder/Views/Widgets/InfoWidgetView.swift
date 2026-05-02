@@ -341,6 +341,10 @@ struct InfoWidgetView: View {
         }
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                tagsRow(for: Array(selectedURLs))
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
+                Divider().padding(.horizontal, 8).padding(.vertical, 4)
                 ForEach(sorted, id: \.self) { url in
                     multiSelectItemRow(url)
                 }
@@ -412,6 +416,8 @@ struct InfoWidgetView: View {
     @ViewBuilder
     private func metadataDetailView(url: URL, meta: FileMetadata, imageMeta: ImageMetadata?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
+            tagsRow(for: [url])
+            Divider().padding(.vertical, 4)
             infoRow("Name", meta.name)
             infoRow("Kind", meta.kind)
             if !meta.uti.isEmpty {
@@ -662,6 +668,18 @@ struct InfoWidgetView: View {
         try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
     }
 
+    @ViewBuilder
+    private func tagsRow(for urls: [URL]) -> some View {
+        HStack(alignment: .top, spacing: 4) {
+            Text("Tags")
+                .frame(width: 70, alignment: .trailing)
+                .foregroundStyle(.secondary)
+            TagsField(urls: urls)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(.system(size: 11))
+    }
+
     private func infoRow(_ label: String, _ value: String) -> some View {
         HStack(alignment: .top, spacing: 4) {
             Text(label)
@@ -671,5 +689,70 @@ struct InfoWidgetView: View {
                 .textSelection(.enabled)
         }
         .font(.system(size: 11))
+    }
+}
+
+private struct TagsField: View {
+    let urls: [URL]
+    @State private var workingTags: [FileTag] = []
+    @State private var loaded: Bool = false
+    @State private var errorMessage: String?
+
+    private let tagService = TagService.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            TagPickerTokenField(
+                tags: $workingTags,
+                availableTags: tagService.availableTags,
+                onCommit: { newTags in
+                    workingTags = newTags
+                    applyToAll(newTags)
+                }
+            )
+            .frame(minHeight: 24)
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onAppear(perform: load)
+        .onChange(of: urls) { _, _ in load() }
+    }
+
+    private func load() {
+        let union = urls.reduce(into: Set<FileTag>()) { acc, url in
+            acc.formUnion(tagService.tags(for: url))
+        }
+        workingTags = union.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        loaded = true
+    }
+
+    private func applyToAll(_ newTags: [FileTag]) {
+        errorMessage = nil
+        let newSet = Set(newTags)
+        for url in urls {
+            let prior = Set(tagService.tags(for: url))
+            let added = newSet.subtracting(prior)
+            let removed = prior.subtracting(newSet)
+            if added.isEmpty && removed.isEmpty { continue }
+            var current = tagService.tags(for: url)
+            for tag in removed { current.removeAll { $0 == tag } }
+            for tag in added where !current.contains(tag) { current.append(tag) }
+            do {
+                try tagService.setTags(current, on: [url])
+            } catch let error as TagWriteError {
+                if errorMessage == nil {
+                    errorMessage = error.localizedDescription
+                }
+            } catch {
+                if errorMessage == nil {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
     }
 }

@@ -13,12 +13,23 @@ struct FileItemIconView: View {
     }
 
     var body: some View {
-        Image(nsImage: icon)
+        Image(nsImage: tintedIfNeeded(icon))
             .resizable()
             .aspectRatio(contentMode: .fit)
             .task(id: item.id) {
                 await refreshIcon()
             }
+    }
+
+    /// Tints folder icons with the primary tag color when the item has
+    /// any colored tag, mirroring Finder's behavior. Non-folders and
+    /// untagged items render unchanged.
+    private func tintedIfNeeded(_ base: NSImage) -> NSImage {
+        guard item.isDirectory,
+              let primary = item.tags.first(where: { !$0.color.rendersAsRing }) else {
+            return base
+        }
+        return primary.color.tinted(base)
     }
 
     private func refreshIcon() async {

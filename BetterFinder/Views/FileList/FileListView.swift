@@ -2,6 +2,29 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+/// Layout constants for keeping the column header aligned with file row content.
+///
+/// SwiftUI's `List(.plain)` on macOS reserves a non-zero leading inset inside
+/// each row's container (~22pt) for selection chrome and alternating-row
+/// background visuals. Our explicit `.listRowInsets(.leading)` stacks on top.
+/// The column header is a sibling of the List (not a row), so it receives none
+/// of the implicit inset — it has to absorb the full visual leading offset
+/// itself to align with row content.
+enum FileListLayout {
+    /// Explicit inset applied to each row via `.listRowInsets`.
+    static let rowExplicitLeading: CGFloat = 8
+
+    /// SwiftUI `List(.plain)` intrinsic leading inset on macOS. Empirical —
+    /// validated on macOS 14+. If a future SDK changes this, update here.
+    static let listIntrinsicLeading: CGFloat = 22
+
+    /// Total leading offset where row content actually begins. The column
+    /// header uses this as its `.padding(.horizontal, ...)` so the two align.
+    static var headerHorizontalPadding: CGFloat {
+        listIntrinsicLeading + rowExplicitLeading
+    }
+}
+
 struct FileListView: View {
     let displayItems: [DisplayItem]
     let sortCriteria: SortCriteria
@@ -31,6 +54,8 @@ struct FileListView: View {
     @Binding var showDeleteConfirmation: Bool
 
     var onZip: (Set<URL>) -> Void = { _ in }
+    var onToggleTag: (FileTag, Set<URL>) -> Void = { _, _ in }
+    var onRefreshTags: (Set<URL>) -> Void = { _ in }
     var onDrop: ([URL], Bool) -> Void = { _, _ in }
     var onDropIntoFolder: ([URL], URL, Bool) -> Void = { _, _, _ in }
     var onConfirmMove: () -> Void = {}
@@ -62,6 +87,9 @@ struct FileListView: View {
     @State private var newItemName = ""
     @State private var renamingURL: URL? = nil
     @State private var renameText = ""
+    @State private var showTagPicker: Bool = false
+    @State private var tagPickerAnchor: Set<URL> = []
+    var tagQueryEmptyStateName: String? = nil
 
     var body: some View {
         // Capture the Binding (not its value) so closures read current
@@ -101,7 +129,8 @@ struct FileListView: View {
                         kindWidth: $kindWidth,
                         effectiveDateWidth: effWidths.date,
                         effectiveSizeWidth: effWidths.size,
-                        effectiveKindWidth: effWidths.kind
+                        effectiveKindWidth: effWidths.kind,
+                        horizontalPadding: FileListLayout.headerHorizontalPadding
                     )
                     Divider()
                 }
@@ -133,12 +162,18 @@ struct FileListView: View {
                     Color.clear
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .overlay {
-                            VStack(spacing: 8) {
-                                Image(systemName: "folder")
-                                    .font(.largeTitle)
+                            if let tagName = tagQueryEmptyStateName {
+                                Text("No files tagged \(tagName).")
+                                    .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
-                                Text("This folder is empty")
-                                    .foregroundStyle(.secondary)
+                            } else {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "folder")
+                                        .font(.largeTitle)
+                                        .foregroundStyle(.secondary)
+                                    Text("This folder is empty")
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                         .onDrop(of: [.fileURL], delegate: PaneDropDelegate(onDrop: onDrop))
@@ -248,7 +283,7 @@ struct FileListView: View {
                     }
                 }
             )
-            .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
+            .listRowInsets(EdgeInsets(top: 2, leading: FileListLayout.rowExplicitLeading, bottom: 2, trailing: FileListLayout.rowExplicitLeading))
             .draggable(displayItem.fileItem.url) {
                 FileDragPreview(item: displayItem.fileItem)
             }
@@ -285,6 +320,12 @@ struct FileListView: View {
                 backgroundContextMenu
             } else {
                 contextMenuContent(forSelection: selectedIDs)
+            }
+        }
+        .popover(isPresented: $showTagPicker, arrowEdge: .trailing) {
+            TagPickerPopover(urls: tagPickerAnchor) {
+                showTagPicker = false
+                onRefreshTags(tagPickerAnchor)
             }
         }
         .onChange(of: selection) { _, newValue in
@@ -416,6 +457,38 @@ struct FileListView: View {
             Button("Show in Finder") {
                 selection = targetURLs
                 NSWorkspace.shared.activateFileViewerSelecting(Array(targetURLs))
+            }
+
+            Divider()
+
+            let appliedToAll: Set<FileTag> = {
+                let perFile = targetURLs.map { Set(TagService.shared.tags(for: $0)) }
+                guard let first = perFile.first else { return [] }
+                return perFile.dropFirst().reduce(first) { $0.intersection($1) }
+            }()
+            Menu("Tags") {
+                ForEach(TagService.shared.favoriteTags.compactMap { $0 }) { tag in
+                    Button {
+                        onToggleTag(tag, targetURLs)
+                    } label: {
+                        Label {
+                            HStack {
+                                Text(tag.name)
+                                if appliedToAll.contains(tag) {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        } icon: {
+                            Image(nsImage: tag.color.dotImage())
+                        }
+                    }
+                }
+                Divider()
+                Button("Tags…") {
+                    tagPickerAnchor = targetURLs
+                    showTagPicker = true
+                }
             }
 
             if isSingle, let item = primaryItem {

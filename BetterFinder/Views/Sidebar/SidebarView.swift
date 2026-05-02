@@ -1,5 +1,22 @@
 import SwiftUI
 
+enum TagSidebarURL {
+    static let scheme = "tag"
+
+    static func make(name: String) -> URL {
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        return URL(string: "\(scheme):///\(encoded)")!
+    }
+
+    /// Returns the decoded tag name if this URL represents a sidebar tag entry.
+    static func tagName(from url: URL) -> String? {
+        guard url.scheme == scheme else { return nil }
+        let path = url.path
+        let trimmed = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        return trimmed.removingPercentEncoding ?? trimmed
+    }
+}
+
 private struct EjectButton: View {
     let action: () -> Void
     @State private var isHovering = false
@@ -26,6 +43,9 @@ struct SidebarView: View {
     let viewModel: SidebarViewModel
     @Binding var selection: URL?
     var onEmptyTrash: () -> Void = {}
+    /// Called when a tag row is tapped while it is already the current
+    /// `selection`. Used to clear the active tag filter.
+    var onTagReclick: (URL) -> Void = { _ in }
     @State private var showEmptyTrashConfirmation = false
 
     var body: some View {
@@ -67,6 +87,28 @@ struct SidebarView: View {
 
                 ForEach(viewModel.networkVolumes) { item in
                     ejectableVolumeRow(item)
+                }
+            }
+
+            Section(header: Text("Tags").fontWeight(.bold)) {
+                ForEach(TagService.shared.favoriteTags.compactMap { $0 }) { tag in
+                    let url = TagSidebarURL.make(name: tag.name)
+                    Label {
+                        Text(tag.name)
+                    } icon: {
+                        Circle()
+                            .fill(tag.color.swiftUIColor)
+                            .frame(width: 10, height: 10)
+                    }
+                    .tag(url)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if selection == url {
+                            onTagReclick(url)
+                        } else {
+                            selection = url
+                        }
+                    }
                 }
             }
         }

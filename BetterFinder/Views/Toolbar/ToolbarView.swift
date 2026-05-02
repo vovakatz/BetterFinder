@@ -12,6 +12,8 @@ struct ToolbarView: View {
     @Binding var viewMode: ViewMode
     @Binding var showHiddenFiles: Bool
     var onToggleHiddenFiles: () -> Void = {}
+    var tagModeIndicator: (name: String, color: Color)? = nil
+    var onClearTagMode: () -> Void = {}
 
     @State private var isEditingPath = false
     @State private var editablePath = ""
@@ -47,6 +49,21 @@ struct ToolbarView: View {
                         isEditingPath = false
                     }
                 )
+            } else if let indicator = tagModeIndicator {
+                HStack(spacing: 6) {
+                    Circle().fill(indicator.color).frame(width: 10, height: 10)
+                    Text("Tag: \(indicator.name)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.primary)
+                    Button(action: onClearTagMode) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Clear tag filter")
+                    Spacer()
+                }
             } else {
                 HStack(spacing: 0) {
                     ScrollView(.horizontal, showsIndicators: false) {

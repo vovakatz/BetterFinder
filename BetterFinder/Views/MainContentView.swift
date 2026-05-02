@@ -28,7 +28,14 @@ struct MainContentView: View, Equatable {
                 showHiddenFiles: $vm.showHiddenFiles,
                 onToggleHiddenFiles: {
                     viewModel.toggleHiddenFiles()
-                }
+                },
+                tagModeIndicator: {
+                    if case .tagQuery(let tag) = vm.mode {
+                        return (name: tag.name, color: tag.color.swiftUIColor)
+                    }
+                    return nil
+                }(),
+                onClearTagMode: { viewModel.closeTagQuery() }
             )
             Divider()
 
@@ -107,6 +114,12 @@ private struct StableFileList: View, Equatable {
                 set: { viewModel.showDeleteConfirmation = $0 }
             ),
             onZip: { viewModel.zipItems($0) },
+            onToggleTag: { tag, urls in
+                Task { await viewModel.toggleTagOnSelection(tag, on: urls) }
+            },
+            onRefreshTags: { urls in
+                Task { await viewModel.refreshTags(for: urls) }
+            },
             onDrop: { urls, isCopy in
                 if isCopy {
                     viewModel.requestCopyItems(urls)
@@ -146,7 +159,13 @@ private struct StableFileList: View, Equatable {
             currentFolderURL: viewModel.currentURL,
             selection: selectionBinding,
             showNewFolderSheet: $showNewFolderSheet,
-            showNewFileSheet: $showNewFileSheet
+            showNewFileSheet: $showNewFileSheet,
+            tagQueryEmptyStateName: {
+                if case .tagQuery(let tag) = viewModel.mode {
+                    return tag.name
+                }
+                return nil
+            }()
         )
     }
 }

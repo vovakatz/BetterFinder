@@ -46,14 +46,19 @@ struct FileRowView: View {
                     )
                     .frame(height: 18)
                 } else {
-                    Text(item.name)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .fontWeight(item.isDirectory ? .bold : .regular)
-                        .foregroundStyle(item.isHidden ? .gray : .primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                        .onHover { onNameHover?($0) }
+                    HStack(spacing: 4) {
+                        Text(item.name)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .fontWeight(item.isDirectory ? .bold : .regular)
+                            .foregroundStyle(item.isHidden ? .gray : .primary)
+                            .layoutPriority(1)
+                            .contentShape(Rectangle())
+                            .onHover { onNameHover?($0) }
+                        Spacer(minLength: 4)
+                        TagDotsView(tags: item.tags)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(.leading, CGFloat(depth) * 16)
