@@ -60,13 +60,19 @@ class GitService {
         isLoading = true
         lastError = nil
 
-        let root = findRepoRoot(for: directory)
+        // Guard against non-file URLs (e.g. network://) — Process throws an
+        // uncatchable NSException when given a non-file currentDirectoryURL,
+        // which corrupts SwiftUI state and crashes on the next update.
+        let root = directory.isFileURL ? findRepoRoot(for: directory) : nil
         repoRoot = root
 
         guard let root else {
             currentBranch = ""
             statusEntries = []
             recentCommits = []
+            aheadCount = 0
+            behindCount = 0
+            hasRemote = false
             isLoading = false
             return
         }
@@ -234,6 +240,10 @@ class GitService {
 
     @discardableResult
     private func runGit(_ arguments: [String], at directory: URL) -> (String, Int32) {
+        // Setting Process.currentDirectoryURL to a non-file URL throws an
+        // Objective-C NSException that Swift's `try` cannot catch.
+        guard directory.isFileURL else { return ("", -1) }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = arguments
