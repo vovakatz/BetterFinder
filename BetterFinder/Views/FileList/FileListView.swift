@@ -783,6 +783,7 @@ private struct FolderDropDelegate: DropDelegate {
     func dropExited(info: DropInfo) { isTargeted = false }
 
     func performDrop(info: DropInfo) -> Bool {
+        isTargeted = false
         let isCopy = NSEvent.modifierFlags.contains(.command)
         let providers = info.itemProviders(for: [.fileURL])
         guard !providers.isEmpty else { return false }
