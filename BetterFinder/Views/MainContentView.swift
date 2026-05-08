@@ -24,7 +24,10 @@ struct MainContentView: View, Equatable {
                 onGoForward: { viewModel.goForward() },
                 onNewFolder: { showNewFolderSheet = true },
                 onNewFile: { showNewFileSheet = true },
-                viewMode: $vm.viewMode,
+                viewMode: Binding(
+                    get: { viewModel.viewMode },
+                    set: { viewModel.setViewMode($0) }
+                ),
                 showHiddenFiles: $vm.showHiddenFiles,
                 onToggleHiddenFiles: {
                     viewModel.toggleHiddenFiles()

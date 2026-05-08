@@ -27,6 +27,7 @@ final class AppSettings {
         static let customDefaultLocationPath = "settings.general.customDefaultLocationPath"
         static let lastLocationPath = "settings.general.lastLocationPath"
         static let defaultSortCriteria = "settings.general.defaultSortCriteria"
+        static let defaultViewMode = "settings.general.defaultViewMode"
         static let terminalBundleID = "settings.general.terminalBundleID"
     }
 
@@ -54,6 +55,10 @@ final class AppSettings {
         }
     }
 
+    var defaultViewMode: ViewMode {
+        didSet { UserDefaults.standard.set(defaultViewMode.rawValue, forKey: Keys.defaultViewMode) }
+    }
+
     var terminalBundleID: String {
         didSet { UserDefaults.standard.set(terminalBundleID, forKey: Keys.terminalBundleID) }
     }
@@ -78,6 +83,13 @@ final class AppSettings {
             self.defaultSortCriteria = decoded
         } else {
             self.defaultSortCriteria = .default
+        }
+
+        if let raw = defaults.string(forKey: Keys.defaultViewMode),
+           let mode = ViewMode(rawValue: raw) {
+            self.defaultViewMode = mode
+        } else {
+            self.defaultViewMode = .list
         }
 
         let storedTerminal = defaults.string(forKey: Keys.terminalBundleID) ?? ""

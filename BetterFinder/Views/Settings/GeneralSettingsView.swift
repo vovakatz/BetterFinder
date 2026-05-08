@@ -93,6 +93,18 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section {
+                Picker("Default view:", selection: $settings.defaultViewMode) {
+                    Text("List").tag(ViewMode.list)
+                    Text("Icons").tag(ViewMode.thumbnails)
+                }
+                .pickerStyle(.segmented)
+            } footer: {
+                Text("Applies to folders that don't already have a remembered view.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .padding(.top, 8)

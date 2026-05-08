@@ -1,11 +1,6 @@
 import Foundation
 import AppKit
 
-enum ViewMode {
-    case list
-    case thumbnails
-}
-
 enum FileListMode: Equatable {
     case directory(URL)
     case tagQuery(FileTag)
@@ -134,30 +129,19 @@ final class FileListViewModel {
     private var pollingTask: Task<Void, Never>?
     private var fileOperationTask: Task<Void, Never>?
 
-    // Per-folder sort persistence: path -> SortCriteria
-    private static let sortDefaultsKey = "folderSortOrders"
-    private static var folderSortOrders: [String: SortCriteria] = {
-        guard let data = UserDefaults.standard.data(forKey: sortDefaultsKey),
-              let decoded = try? JSONDecoder().decode([String: SortCriteria].self, from: data)
-        else { return [:] }
-        return decoded
-    }()
-
-    private static func saveFolderSortOrders() {
-        if let data = try? JSONEncoder().encode(folderSortOrders) {
-            UserDefaults.standard.set(data, forKey: sortDefaultsKey)
-        }
+    /// Resolves view settings for a folder path: stored deviation overrides app default.
+    private func applyResolvedSettings(for path: String) {
+        let stored = FolderViewSettingsStore.shared.settings(for: path)
+        let defaults = AppSettings.shared
+        viewMode = stored.viewMode ?? defaults.defaultViewMode
+        sortCriteria = stored.sortCriteria ?? defaults.defaultSortCriteria
+        showHiddenFiles = stored.showHiddenFiles ?? defaults.showHiddenFilesByDefault
     }
 
-    // Per-folder hidden files persistence: set of paths where hidden files are shown
-    private static let hiddenFilesDefaultsKey = "folderShowHiddenFiles"
-    private static var folderShowHiddenFiles: Set<String> = {
-        let array = UserDefaults.standard.stringArray(forKey: hiddenFilesDefaultsKey) ?? []
-        return Set(array)
-    }()
-
-    private static func saveFolderShowHiddenFiles() {
-        UserDefaults.standard.set(Array(folderShowHiddenFiles), forKey: hiddenFilesDefaultsKey)
+    /// True when the current mode is a directory whose deviations should be persisted.
+    private var canPersistFolderSettings: Bool {
+        if case .directory = mode { return true }
+        return false
     }
 
     var volumeStatusText: String {
@@ -243,10 +227,11 @@ final class FileListViewModel {
         let resolvedStart = startURL ?? AppSettings.shared.initialURL()
         self.navigationState = NavigationState(url: resolvedStart)
         self.mode = .directory(resolvedStart)
-        self.sortCriteria = Self.folderSortOrders[resolvedStart.path] ?? AppSettings.shared.defaultSortCriteria
-        self.showHiddenFiles = Self.folderShowHiddenFiles.contains(resolvedStart.path)
-            ? true
-            : AppSettings.shared.showHiddenFilesByDefault
+        let stored = FolderViewSettingsStore.shared.settings(for: resolvedStart.path)
+        let defaults = AppSettings.shared
+        self.viewMode = stored.viewMode ?? defaults.defaultViewMode
+        self.sortCriteria = stored.sortCriteria ?? defaults.defaultSortCriteria
+        self.showHiddenFiles = stored.showHiddenFiles ?? defaults.showHiddenFilesByDefault
         setupXattrObserver()
         xattrObserver.start(watching: resolvedStart)
     }
@@ -277,10 +262,7 @@ final class FileListViewModel {
         isLoading = true
         rebuildDisplayItems()
         navigationState.navigate(to: url)
-        sortCriteria = Self.folderSortOrders[url.path] ?? AppSettings.shared.defaultSortCriteria
-        showHiddenFiles = Self.folderShowHiddenFiles.contains(url.path)
-            ? true
-            : AppSettings.shared.showHiddenFilesByDefault
+        applyResolvedSettings(for: url.path)
         Task { await reload() }
     }
 
@@ -389,20 +371,14 @@ final class FileListViewModel {
 
     func goBack() {
         if let _ = navigationState.goBack() {
-            sortCriteria = Self.folderSortOrders[currentURL.path] ?? AppSettings.shared.defaultSortCriteria
-            showHiddenFiles = Self.folderShowHiddenFiles.contains(currentURL.path)
-                ? true
-                : AppSettings.shared.showHiddenFilesByDefault
+            applyResolvedSettings(for: currentURL.path)
             Task { await reload() }
         }
     }
 
     func goForward() {
         if let _ = navigationState.goForward() {
-            sortCriteria = Self.folderSortOrders[currentURL.path] ?? AppSettings.shared.defaultSortCriteria
-            showHiddenFiles = Self.folderShowHiddenFiles.contains(currentURL.path)
-                ? true
-                : AppSettings.shared.showHiddenFilesByDefault
+            applyResolvedSettings(for: currentURL.path)
             Task { await reload() }
         }
     }
@@ -415,13 +391,13 @@ final class FileListViewModel {
 
     func toggleHiddenFiles() {
         showHiddenFiles.toggle()
-        let path = currentURL.path
-        if showHiddenFiles {
-            Self.folderShowHiddenFiles.insert(path)
-        } else {
-            Self.folderShowHiddenFiles.remove(path)
+        if canPersistFolderSettings {
+            let current = showHiddenFiles
+            let appDefault = AppSettings.shared.showHiddenFilesByDefault
+            FolderViewSettingsStore.shared.update(for: currentURL.path) { settings in
+                settings.showHiddenFiles = (current == appDefault) ? nil : current
+            }
         }
-        Self.saveFolderShowHiddenFiles()
         Task { await reload() }
     }
 
@@ -432,15 +408,25 @@ final class FileListViewModel {
             sortCriteria.field = field
             sortCriteria.ascending = true
         }
-        // Persist per-folder sort (remove entry if back to default)
-        let path = currentURL.path
-        if sortCriteria == .default {
-            Self.folderSortOrders.removeValue(forKey: path)
-        } else {
-            Self.folderSortOrders[path] = sortCriteria
+        if canPersistFolderSettings {
+            let current = sortCriteria
+            let appDefault = AppSettings.shared.defaultSortCriteria
+            FolderViewSettingsStore.shared.update(for: currentURL.path) { settings in
+                settings.sortCriteria = (current == appDefault) ? nil : current
+            }
         }
-        Self.saveFolderSortOrders()
         Task { await reload() }
+    }
+
+    func setViewMode(_ newMode: ViewMode) {
+        guard viewMode != newMode else { return }
+        viewMode = newMode
+        if canPersistFolderSettings {
+            let appDefault = AppSettings.shared.defaultViewMode
+            FolderViewSettingsStore.shared.update(for: currentURL.path) { settings in
+                settings.viewMode = (newMode == appDefault) ? nil : newMode
+            }
+        }
     }
 
     private static let trashURL = try? FileManager.default.url(for: .trashDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
@@ -1198,13 +1184,27 @@ final class FileListViewModel {
     /// Re-reads tag values for a subset of URLs and updates `items` in
     /// place. Used after a local tag write to avoid a full directory
     /// reload.
+    ///
+    /// IMPORTANT: this is also invoked from the recursive FSEvents xattr
+    /// observer, which reports changes for any file under the watched
+    /// root — including paths under `~/Library/Containers/<other-app>/`
+    /// when the user is browsing `$HOME`. Reading resource values on
+    /// those URLs triggers the macOS TCC "access data from other apps"
+    /// prompt. We avoid that by only reading tags for URLs that are
+    /// actually visible in this view.
     @MainActor
     func refreshTags(for urls: Set<URL>) async {
         var changed = false
         for url in urls {
+            let itemIndex = items.firstIndex { $0.id == url }
+            let childHit = childItems.first { _, children in
+                children.contains { $0.id == url }
+            }
+            guard itemIndex != nil || childHit != nil else { continue }
+
             let newTags = TagService.shared.tags(for: url)
 
-            if let index = items.firstIndex(where: { $0.id == url }) {
+            if let index = itemIndex {
                 let existing = items[index]
                 if newTags != existing.tags {
                     items[index] = Self.replacingTags(in: existing, with: newTags)
@@ -1212,14 +1212,15 @@ final class FileListViewModel {
                 }
             }
 
-            for (parent, children) in childItems {
-                guard let childIndex = children.firstIndex(where: { $0.id == url }) else { continue }
+            if let (parent, children) = childHit,
+               let childIndex = children.firstIndex(where: { $0.id == url }) {
                 let existing = children[childIndex]
-                guard newTags != existing.tags else { continue }
-                var updated = children
-                updated[childIndex] = Self.replacingTags(in: existing, with: newTags)
-                childItems[parent] = updated
-                changed = true
+                if newTags != existing.tags {
+                    var updated = children
+                    updated[childIndex] = Self.replacingTags(in: existing, with: newTags)
+                    childItems[parent] = updated
+                    changed = true
+                }
             }
         }
         if changed { rebuildDisplayItems() }
