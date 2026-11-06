@@ -275,13 +275,7 @@ struct FileListView: View {
                 renameText: $renameText,
                 onCommitRename: { commitRename(for: displayItem.id) },
                 onCancelRename: { cancelRename() },
-                onNameHover: { hovering in
-                    if hovering {
-                        doubleClickProxy.nameHoverURL = displayItem.id
-                    } else if doubleClickProxy.nameHoverURL == displayItem.id {
-                        doubleClickProxy.nameHoverURL = nil
-                    }
-                }
+                onNameHover: { handleNameHover($0, for: displayItem.id) }
             )
             .listRowInsets(EdgeInsets(top: 2, leading: FileListLayout.rowExplicitLeading, bottom: 2, trailing: FileListLayout.rowExplicitLeading))
             .draggable(displayItem.fileItem.url) {
@@ -349,7 +343,8 @@ struct FileListView: View {
                         isRenaming: renamingURL == displayItem.id,
                         renameText: $renameText,
                         onCommitRename: { commitRename(for: displayItem.id) },
-                        onCancelRename: { cancelRename() }
+                        onCancelRename: { cancelRename() },
+                        onNameHover: { handleNameHover($0, for: displayItem.id) }
                     )
                     .onTapGesture {
                         selection = [displayItem.id]
@@ -595,6 +590,14 @@ struct FileListView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(string, forType: .string)
+    }
+
+    private func handleNameHover(_ hovering: Bool, for id: FileItem.ID) {
+        if hovering {
+            doubleClickProxy.nameHoverURL = id
+        } else if doubleClickProxy.nameHoverURL == id {
+            doubleClickProxy.nameHoverURL = nil
+        }
     }
 
     private func commitRename(for url: URL) {

@@ -20,7 +20,7 @@ struct RenameTextField: NSViewRepresentable {
         cell.wraps = false
         cell.lineBreakMode = .byClipping
 
-        let field = NSTextField(frame: .zero)
+        let field = AutoFocusTextField(frame: .zero)
         field.cell = cell
         field.stringValue = text
         field.font = .systemFont(ofSize: fontSize)
@@ -36,7 +36,8 @@ struct RenameTextField: NSViewRepresentable {
 
         field.setContentHuggingPriority(.defaultHigh, for: .vertical)
 
-        DispatchQueue.main.async {
+        field.onAddedToWindow = { [weak field] in
+            guard let field else { return }
             field.window?.makeFirstResponder(field)
             if let editor = field.currentEditor() as? NSTextView {
                 let name = text
@@ -62,6 +63,19 @@ struct RenameTextField: NSViewRepresentable {
             return name.count
         }
         return name.distance(from: name.startIndex, to: dotIndex)
+    }
+
+    /// SwiftUI can attach the field to its window after `makeNSView` returns,
+    /// so focus has to wait until the field is really in a window.
+    class AutoFocusTextField: NSTextField {
+        var onAddedToWindow: (() -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil, let action = onAddedToWindow else { return }
+            onAddedToWindow = nil
+            DispatchQueue.main.async(execute: action)
+        }
     }
 
     class CompactTextFieldCell: NSTextFieldCell {

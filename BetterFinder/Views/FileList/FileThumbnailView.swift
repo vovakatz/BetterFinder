@@ -8,6 +8,7 @@ struct FileThumbnailView: View {
     @Binding var renameText: String
     var onCommitRename: () -> Void = {}
     var onCancelRename: () -> Void = {}
+    var onNameHover: ((Bool) -> Void)?
 
     @State private var thumbnail: NSImage?
 
@@ -38,6 +39,8 @@ struct FileThumbnailView: View {
                     .font(.system(size: 11))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
+                    .contentShape(Rectangle())
+                    .onHover { onNameHover?($0) }
             }
 
             if !item.isDirectory {
