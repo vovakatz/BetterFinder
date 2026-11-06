@@ -116,20 +116,29 @@ static void postClick(CGFloat x, CGFloat y, NSEventType downType, NSEventType up
     if (!window.isKeyWindow || !NSApp.isActive) {
         logLine(@"WARNING: window not key/active (key=%d active=%d); result may be invalid", window.isKeyWindow, NSApp.isActive);
     }
+    // Hold each press like a real click does: .onTapGesture can miss a zero-length one.
+    const double hold = 0.06;
     for (NSInteger count = 1; count <= clicks; count++) {
-        [NSApp postEvent:mouseEvent(downType, point, window, count, flags) atStart:NO];
-        [NSApp postEvent:mouseEvent(upType, point, window, count, flags) atStart:NO];
+        double start = (count - 1) * 2 * hold;
+        after(start, ^{ [NSApp postEvent:mouseEvent(downType, point, window, count, flags) atStart:NO]; });
+        after(start + hold, ^{ [NSApp postEvent:mouseEvent(upType, point, window, count, flags) atStart:NO]; });
     }
 }
 
-// Tracking areas only react to the real cursor, so hand the hosting view the same
-// callbacks it would get. The cursor itself doesn't move.
+// Tracking areas only react to the real cursor, so hand the views under the point
+// the same callbacks they would get. The cursor itself doesn't move. List rows have
+// their own hosting views inside the table, so the window's root view isn't enough.
 static void moveMouse(CGFloat x, CGFloat y) {
     NSWindow *window = mainWindow();
     NSPoint point = NSMakePoint(x, window.contentView.bounds.size.height - y);
     NSEvent *event = mouseEvent(NSEventTypeMouseMoved, point, window, 0, 0);
-    [window.contentView mouseEntered:event];
-    [window.contentView mouseMoved:event];
+    for (NSView *view = [window.contentView.superview hitTest:point]; view; view = view.superview) {
+        if ([NSStringFromClass(view.class) containsString:@"Hosting"]) {
+            [view mouseEntered:event];
+            [view mouseMoved:event];
+        }
+        if (view == window.contentView) break;
+    }
 }
 
 static NSEventModifierFlags parseModifiers(NSArray<NSString *> *names) {
@@ -337,6 +346,13 @@ __attribute__((constructor)) static void start(void) {
                                                 usingBlock:^(NSNotification *note) { openMenu = note.object; }];
     [NSNotificationCenter.defaultCenter addObserverForName:NSMenuDidEndTrackingNotification object:nil queue:nil
                                                 usingBlock:^(NSNotification *note) { openMenu = nil; }];
+
+    // Says who took focus, which explains an invalid run.
+    [NSWorkspace.sharedWorkspace.notificationCenter addObserverForName:NSWorkspaceDidActivateApplicationNotification object:nil queue:nil
+        usingBlock:^(NSNotification *note) {
+            NSRunningApplication *app = note.userInfo[NSWorkspaceApplicationKey];
+            logLine(@"focus: %@ became active", app.localizedName);
+        }];
 
     // Runs off the main thread, so it still fires when a step wedges the app.
     double limit = timeout ? atof(timeout) : 60;

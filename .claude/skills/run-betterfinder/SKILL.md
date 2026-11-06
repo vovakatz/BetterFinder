@@ -44,7 +44,7 @@ A window appears on the real screen and takes focus for the length of the run.
 | `wait <sec>` | Pause. Put one after every input, before you observe the result. |
 | `click <x> <y> [cmd] [shift] [opt] [ctrl]` | Left click. |
 | `rclick <x> <y>` | Opens the context menu. |
-| `move <x> <y>` | Hover over a point. Required before `dclick`. |
+| `move <x> <y>` | Hover over a point. Required before `dclick`, and before clicking a name to rename it. |
 | `dclick <x> <y>` | Double click. |
 | `key <name> [cmd] [shift] [opt] [ctrl]` | A character, or `return`, `escape`, `tab`, `delete`, `up`, `down`, `left`, `right`. |
 | `type <text>` | Insert text into the focused field, or warn if no text field has focus. |
@@ -63,7 +63,7 @@ A window appears on the real screen and takes focus for the length of the run.
 
 Coordinates are points from the window's top-left, and snapshots are 2x, so halve what you read off a PNG. A run always starts at 1000x650.
 
-- **Grid cells:** columns at x = 262, 407, 553, 698 and rows at y = 134, 273, 412.
+- **Grid cells:** columns at x = 262, 407, 553, 698 and rows at y = 134, 273, 412. A cell's name is 51 points below its center, such as (407, 324).
 - **Selection in the grid:** sample 57 points left of the cell's center, such as `pixel 350 273` for the cell at (407, 273). Selected reads `rgba=(50,120,245,51)`, unselected reads `(0,0,0,0)`.
 - **List rows:** the first row is at y = 113, and each row is 20 points tall.
 
@@ -83,7 +83,7 @@ pixel 350 273 after_unrelated_write
 EOF
 ```
 
-**Use a context menu, then check the result on disk.** `menu` also shows what a menu targets: Rename only appears for a single file. This recipe is flaky: see the rename gotcha below.
+**Use a context menu, then check the result on disk.** `menu` also shows what a menu targets: Rename only appears for a single file.
 
 ```bash
 .claude/skills/run-betterfinder/drive.sh fixtures
@@ -98,6 +98,28 @@ type renamed-file
 wait 0.3
 click 553 273
 wait 1.2
+EOF
+ls "$(.claude/skills/run-betterfinder/drive.sh path)/fixtures/photos" | grep renamed
+```
+
+**Click a selected name to rename it.** The second click starts the rename after a 0.5 second delay, so `wait` past that before typing. Use the same steps in list view with `--mode list` and a point on a row's name, such as (275, 133).
+
+```bash
+.claude/skills/run-betterfinder/drive.sh fixtures
+.claude/skills/run-betterfinder/drive.sh run --out click-rename <<'EOF'
+wait 3
+move 407 324
+wait 0.3
+click 407 324
+wait 1.1
+move 407 324
+wait 0.2
+click 407 324
+wait 1
+type renamed-file
+wait 0.3
+key return
+wait 1
 EOF
 ls "$(.claude/skills/run-betterfinder/drive.sh path)/fixtures/photos" | grep renamed
 ```
@@ -168,7 +190,6 @@ There is no test suite. Verify changes with the driver.
 ## Gotchas
 
 - **`pick` and `type` act for real.** Move to Trash really trashes. Keep them on fixtures. `--folder` is for read-only looking at real folders, such as a network volume, and `touch` refuses to run there. Give network folders a longer first `wait` (12 seconds worked for 23 photos on a NAS).
-- **The rename field misses focus in about 1 run in 4.** `RenameTextField` focuses itself in a `DispatchQueue.main.async`, and focus sometimes stays on the sidebar's list instead (6 of 24 runs, on builds with and without the gallery fix). `type` then warns and the run reports INVALID, so run it again. When the field had focus, rename worked every time.
 - **`dclick` without `move` only selects.** The app ignores double-clicks unless `.onHover` reports the mouse over the view, and synthetic clicks don't produce hover. The log looks clean either way, so check the path bar or the Back arrow.
 - **`key return` doesn't open items in the grid.** Its `.onKeyPress` needs keyboard focus that the scroll view doesn't have. Use `move` then `dclick`.
 - **Double-clicking a JPEG launches Preview,** which takes focus and leaves a window open. Test opening with `--fixture nested`.
@@ -179,12 +200,14 @@ There is no test suite. Verify changes with the driver.
 - **Cmd+A acts oddly under the driver.** With nothing selected it does nothing, and after a selection it reports one item fewer than it highlights. Don't treat it as a reliable way to select everything.
 - **SourceKit errors like `Cannot find type 'FileListViewModel' in scope` are noise** from single-file indexing. Trust `xcodebuild`.
 - **Editing `driver.m`: post events with `postEvent`, never `sendEvent`.** `sendEvent` bypasses the queue, so `NSTableView`'s tracking loop never sees the mouse-up and the app hangs.
+- **Editing `driver.m`: keep hover on hosting views.** List rows have their own `CellHostingView`, so `move` walks the views under the point. Sending `mouseEntered:` to the window frame raises an exception.
+- **A crash shows the developer a macOS dialog.** Its Reopen button starts the test copy with no driver or arguments, and that copy then trips the double-launch guard.
 - **Agent shell limits:** foreground `sleep` is blocked and macOS has no `timeout`, so use `wait` steps and `--timeout`. zsh aborts on unmatched globs, so quote them.
 
 ## Troubleshooting
 
-- **`error: another driven instance is running (pid N)`:** two copies fight over focus and the loser's results are invalid. Let it finish, or kill that pid.
-- **`INVALID RUN`, exit 4:** a `WARNING` was logged. Either the window lost focus mid-run (seen intermittently, cause unknown) or `type` found no text field. Clicks on an unfocused window don't behave normally, so discard the results and run again.
+- **`error: another driven instance is running (pid N)`:** two copies fight over focus and the loser's results are invalid. Let it finish, or kill that pid. If `ps -o ppid,command -p N` shows parent 1 and no arguments, it's a test copy reopened after a crash, and it's safe to kill.
+- **`INVALID RUN`, exit 4:** a `WARNING` was logged. Either the window lost focus mid-run or `type` found no text field. Clicks on an unfocused window don't behave normally, so discard the results and run again. `focus: <app> became active` lines in the log name what took it. If the developer is using the Mac, that can hit every run, so wait until they're done rather than retrying.
 - **`WATCHDOG: exceeded Ns, stuck at step: ...`, exit 124:** the step wedged the main thread, or the script simply outlasted `--timeout`. Raise the timeout, or look at `app.log`.
 - **`menu: no context menu is open`:** nothing was under the point, or the `wait` after `rclick` was too short. The `windows` step shows an `NSPopupMenuWindow` when a menu is really open.
 - **`error: no build for tag 'NAME'`:** run `drive.sh build --tag NAME` first.
