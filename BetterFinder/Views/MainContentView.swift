@@ -84,6 +84,11 @@ private struct StableFileList: View, Equatable {
             set: { viewModel.selectedItems = $0 }
         )
 
+        // AppKit draws the List's highlight, but the thumbnail grid draws its
+        // own in SwiftUI from `selection`, so it must re-render when selection
+        // changes. Track it in that mode only, so the List stays untracked.
+        let _ = viewModel.viewMode == .thumbnails ? viewModel.selectedItems : []
+
         FileListView(
             displayItems: viewModel.displayItems,
             sortCriteria: viewModel.sortCriteria,
