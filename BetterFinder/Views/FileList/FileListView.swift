@@ -203,15 +203,13 @@ struct FileListView: View {
                 Button("Move") { onConfirmMove() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                let names = pendingMoveNames.joined(separator: ", ")
-                Text("Move \(names) to \"\(pendingMoveDestinationName)\"?")
+                Text("Move \(itemsDescription(pendingMoveNames)) to \"\(pendingMoveDestinationName)\"?")
             }
             .alert("Copy Items?", isPresented: $showCopyConfirmation) {
                 Button("Copy") { onConfirmCopy() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                let names = pendingCopyNames.joined(separator: ", ")
-                Text("Copy \(names) to \"\(pendingCopyDestinationName)\"?")
+                Text("Copy \(itemsDescription(pendingCopyNames)) to \"\(pendingCopyDestinationName)\"?")
             }
             .alert("Item is not movable", isPresented: $showPermissionError) {
                 Button("Skip") { onSkipPermissionItem() }
@@ -590,6 +588,11 @@ struct FileListView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(string, forType: .string)
+    }
+
+    /// Names a single item, and counts anything more so the alert stays short.
+    private func itemsDescription(_ names: [String]) -> String {
+        names.count == 1 ? names[0] : "\(names.count) items"
     }
 
     private func handleNameHover(_ hovering: Bool, for id: FileItem.ID) {
