@@ -62,7 +62,9 @@ A window appears on the real screen and takes focus for the length of the run.
 | `pixel <x> <y> [label]` | Log RGBA at a point. Alpha 0 means nothing is drawn there. |
 | `stall <sec>` | Log the longest main-thread stall. Start it **before** the action. |
 | `touch <name>` | Create a file in the start folder (fixtures only). |
-| `windows` | Log the app's windows and run loop mode. |
+| `windows` | Log the app's windows, with titles, and the run loop mode. |
+| `usewindow <title>` | Make later steps act on the window with this title. `usewindow main` goes back. |
+| `default <key>` | Log a stored setting. Blank means it was never set. |
 | `quit` | Exit now. The script also exits at its end. |
 
 `run` options: `--fixture NAME` or `--folder PATH` picks the start folder (default: `photos`), `--mode thumbnails|list` (default: `thumbnails`), `--favorites A,B` replaces the sidebar favorites with fixture folders (`trash` means the real Trash), `--tag NAME` picks the build, `--timeout SEC` sets the watchdog (default: 60).
@@ -174,6 +176,23 @@ wait 0.2
 dclick 270 233
 wait 0.7
 tables
+EOF
+```
+
+**Change a setting.** `key , cmd` opens Settings. Everything from `usewindow` on acts on that window, and coordinates come from a `snap` of it. To start a run with a setting already stored, run `defaults write com.KatzStudio.BetterFinder.agent <key> ...` first; `run` deletes it afterwards.
+
+```bash
+.claude/skills/run-betterfinder/drive.sh run --out settings --favorites dest/inbox <<'EOF'
+wait 0.4
+key , cmd
+wait 0.8
+usewindow BetterFinder Settings
+wait 0.4
+snap settings
+click 512 284
+wait 0.4
+default settings.general.confirmBeforeMoveOrCopy
+usewindow main
 EOF
 ```
 

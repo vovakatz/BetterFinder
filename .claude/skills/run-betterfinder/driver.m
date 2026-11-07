@@ -44,7 +44,10 @@ static void after(double seconds, dispatch_block_t block) {
     dispatch_resume(timer);
 }
 
+static NSWindow *targetWindow;
+
 static NSWindow *mainWindow(void) {
+    if (targetWindow.isVisible) return targetWindow;
     for (NSWindow *window in NSApp.windows) {
         if (window.isVisible && window.contentView && window.frame.size.width > 300) return window;
     }
@@ -456,13 +459,24 @@ static void runStep(NSString *line) {
         logAlert();
     } else if ([command isEqual:@"button"]) {
         pressButton(rest);
+    } else if ([command isEqual:@"usewindow"]) {
+        // Later steps act on the window with this title. "main" goes back.
+        targetWindow = nil;
+        for (NSWindow *window in NSApp.windows) {
+            if (window.isVisible && [window.title isEqual:rest]) targetWindow = window;
+        }
+        if (![rest isEqual:@"main"] && !targetWindow) logLine(@"WARNING: no visible window titled \"%@\"", rest);
+        [mainWindow() makeKeyAndOrderFront:nil];
+        logLine(@"usewindow %@ (%.0fx%.0f)", rest, mainWindow().contentView.bounds.size.width, mainWindow().contentView.bounds.size.height);
+    } else if ([command isEqual:@"default"]) {
+        logLine(@"default %@ = %@", rest, [NSUserDefaults.standardUserDefaults objectForKey:rest]);
     } else if ([command isEqual:@"menu"]) {
         logMenu();
     } else if ([command isEqual:@"pick"]) {
         pickMenuItem(rest);
     } else if ([command isEqual:@"windows"]) {
         for (NSWindow *window in NSApp.windows) {
-            logLine(@"window %@ visible=%d level=%ld %.0fx%.0f", NSStringFromClass(window.class), window.isVisible,
+            logLine(@"window %@ \"%@\" visible=%d level=%ld %.0fx%.0f", NSStringFromClass(window.class), window.title, window.isVisible,
                     (long)window.level, window.frame.size.width, window.frame.size.height);
         }
         logLine(@"runloop mode: %@", NSRunLoop.currentRunLoop.currentMode);
