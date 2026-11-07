@@ -46,6 +46,8 @@ struct SidebarView: View {
     /// Called when a tag row is tapped while it is already the current
     /// `selection`. Used to clear the active tag filter.
     var onTagReclick: (URL) -> Void = { _ in }
+    /// Called when items are dropped onto a favorite row. The Bool is true for a copy.
+    var onDropIntoFavorite: ([URL], SidebarItem, Bool) -> Void = { _, _, _ in }
     @State private var showEmptyTrashConfirmation = false
 
     var body: some View {
@@ -53,6 +55,13 @@ struct SidebarView: View {
             Section(header: Text("Favorites").fontWeight(.bold)) {
                 ForEach(viewModel.favorites) { item in
                     Label(item.name, systemImage: item.icon)
+                        // Makes the drop target nearly fill the row. What's left at the
+                        // row's edges goes to the list, which adds a favorite there.
+                        .padding(.vertical, 4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .modifier(FolderDropModifier(folderURL: item.url) { urls, _, isCopy in
+                            onDropIntoFavorite(urls, item, isCopy)
+                        })
                         .tag(item.url)
                         .contextMenu {
                             if item.isTrash {

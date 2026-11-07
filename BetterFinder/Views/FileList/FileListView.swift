@@ -773,7 +773,7 @@ private struct PaneDropDelegate: DropDelegate {
     }
 }
 
-private struct FolderDropDelegate: DropDelegate {
+struct FolderDropDelegate: DropDelegate {
     let folderURL: URL
     let onDropIntoFolder: ([URL], URL, Bool) -> Void
     @Binding var isTargeted: Bool
@@ -808,11 +808,16 @@ private struct FolderDropDelegate: DropDelegate {
     }
 }
 
-private struct FolderDropModifier: ViewModifier {
+struct FolderDropModifier: ViewModifier {
     let folderURL: URL
     let onDropIntoFolder: ([URL], URL, Bool) -> Void
 
     @State private var isTargeted = false
+
+    init(folderURL: URL, onDropIntoFolder: @escaping ([URL], URL, Bool) -> Void) {
+        self.folderURL = folderURL
+        self.onDropIntoFolder = onDropIntoFolder
+    }
 
     func body(content: Content) -> some View {
         content

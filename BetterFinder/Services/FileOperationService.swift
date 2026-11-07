@@ -305,8 +305,9 @@ struct FileOperationService: Sendable {
     }
 
     private nonisolated func isSameOrDescendant(_ candidate: URL, of ancestor: URL) -> Bool {
-        let candidatePath = candidate.standardizedFileURL.path(percentEncoded: false)
-        let ancestorPath = ancestor.standardizedFileURL.path(percentEncoded: false)
+        // `path` drops a folder URL's trailing slash, which would break the prefix check.
+        let candidatePath = candidate.standardizedFileURL.path
+        let ancestorPath = ancestor.standardizedFileURL.path
         return candidatePath == ancestorPath || candidatePath.hasPrefix(ancestorPath + "/")
     }
 

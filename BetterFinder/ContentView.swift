@@ -114,6 +114,17 @@ struct ContentView: View {
         showDualPane && activePaneIsSecond ? secondFileListVM : fileListVM
     }
 
+    private func dropIntoFavorite(_ urls: [URL], favorite: SidebarItem, isCopy: Bool) {
+        if favorite.isTrash {
+            let toTrash = urls.filter { !$0.deletingLastPathComponent().isSameLocation(as: favorite.url) }
+            if !toTrash.isEmpty { activeVM.moveToTrash(Set(toTrash)) }
+        } else if isCopy {
+            activeVM.requestCopyItems(urls, destination: favorite.url)
+        } else {
+            activeVM.requestMoveItems(urls, destination: favorite.url)
+        }
+    }
+
     private var fileOperationOwner: FileListViewModel? {
         if activeVM.fileOperationProgress != nil { return activeVM }
         if fileListVM.fileOperationProgress != nil { return fileListVM }
@@ -165,6 +176,9 @@ struct ContentView: View {
                             activeVM.closeTagQuery()
                             sidebarSelection = matchingSidebarURL(for: activeVM.currentURL)
                         }
+                    },
+                    onDropIntoFavorite: { urls, favorite, isCopy in
+                        dropIntoFavorite(urls, favorite: favorite, isCopy: isCopy)
                     }
                 )
                     .frame(width: CGFloat(leftSidebarWidth))

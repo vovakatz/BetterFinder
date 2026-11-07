@@ -1068,12 +1068,17 @@ final class FileListViewModel {
 
     // MARK: - Drop/Move operations
 
+    /// Leaves out the destination itself and anything already directly inside it.
+    private func itemsToTransfer(_ urls: [URL], to destination: URL) -> [URL] {
+        urls.filter {
+            !$0.isSameLocation(as: destination)
+            && !$0.deletingLastPathComponent().isSameLocation(as: destination)
+        }
+    }
+
     func requestMoveItems(_ urls: [URL], destination: URL? = nil) {
         let dest = destination ?? currentURL
-        let toMove = urls.filter {
-            $0.deletingLastPathComponent().standardizedFileURL != dest.standardizedFileURL
-            && $0.standardizedFileURL != dest.standardizedFileURL
-        }
+        let toMove = itemsToTransfer(urls, to: dest)
         guard !toMove.isEmpty else { return }
         pendingMoveURLs = toMove
         pendingMoveDestination = dest
@@ -1092,10 +1097,7 @@ final class FileListViewModel {
 
     func requestCopyItems(_ urls: [URL], destination: URL? = nil) {
         let dest = destination ?? currentURL
-        let toCopy = urls.filter {
-            $0.deletingLastPathComponent().standardizedFileURL != dest.standardizedFileURL
-            && $0.standardizedFileURL != dest.standardizedFileURL
-        }
+        let toCopy = itemsToTransfer(urls, to: dest)
         guard !toCopy.isEmpty else { return }
         pendingCopyURLs = toCopy
         pendingCopyDestination = dest
