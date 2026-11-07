@@ -1,7 +1,15 @@
 // Generates distinctly colored JPEGs so grid cells are easy to tell apart in snapshots.
 // Usage: make_fixtures <directory> <count>
+//        make_fixtures --alias <target> <alias path>
 // Files past the first 12 are copies, which APFS clones at no disk cost.
 import Cocoa
+
+if CommandLine.arguments[1] == "--alias" {
+    let target = URL(fileURLWithPath: CommandLine.arguments[2])
+    let data = try target.bookmarkData(options: .suitableForBookmarkFile, includingResourceValuesForKeys: nil, relativeTo: nil)
+    try URL.writeBookmarkData(data, to: URL(fileURLWithPath: CommandLine.arguments[3]))
+    exit(0)
+}
 
 let directory = CommandLine.arguments[1]
 let count = Int(CommandLine.arguments[2]) ?? 12

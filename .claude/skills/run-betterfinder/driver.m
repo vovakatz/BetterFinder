@@ -6,6 +6,12 @@
 // of the app's own window need no Accessibility or Screen Recording permission.
 // See SKILL.md for the step reference.
 #import <Cocoa/Cocoa.h>
+#import <objc/runtime.h>
+
+@interface NSWindow (DriverPrivate)
+// AppKit's own lookup of which view a drag at this location goes to.
+- (id)_findDragTargetFrom:(id<NSDraggingInfo>)info;
+@end
 
 static NSString *outDir;
 static NSFileHandle *logHandle;
@@ -53,18 +59,29 @@ static void quitNow(int code) {
 
 // MARK: - Snapshots
 
-static NSBitmapImageRep *captureWindow(NSWindow *window) {
-    NSView *view = window.contentView;
+static NSBitmapImageRep *captureView(NSView *view) {
     NSBitmapImageRep *rep = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
     [view cacheDisplayInRect:view.bounds toBitmapImageRep:rep];
     return rep;
 }
 
+static NSBitmapImageRep *captureWindow(NSWindow *window) {
+    return captureView(window.contentView);
+}
+
+static NSTableView *firstTable(NSView *view) {
+    if ([view isKindOfClass:NSTableView.class]) return (NSTableView *)view;
+    for (NSView *subview in view.subviews) {
+        NSTableView *table = firstTable(subview);
+        if (table) return table;
+    }
+    return nil;
+}
+
 // The capture has an alpha channel, and viewers show translucent pixels misleadingly
 // (a 20% tint can look solid), so the saved PNG is flattened onto white.
-static void snap(NSString *name) {
-    NSWindow *window = mainWindow();
-    NSBitmapImageRep *rep = captureWindow(window);
+static void snap(NSString *name, NSView *view) {
+    NSBitmapImageRep *rep = captureView(view);
     NSInteger width = rep.pixelsWide, height = rep.pixelsHigh;
     NSBitmapImageRep *flat = [[NSBitmapImageRep alloc]
         initWithBitmapDataPlanes:NULL pixelsWide:width pixelsHigh:height bitsPerSample:8
@@ -171,6 +188,161 @@ static void postKey(NSString *name, NSEventModifierFlags flags) {
     }
 }
 
+// MARK: - Drag and drop
+
+// A real drag needs the window server, so this stands in for its session. Everything
+// after that is real: AppKit picks the destination view, and SwiftUI handles the drop.
+@interface DriverDrag : NSObject <NSDraggingInfo>
+@property (nonatomic) NSPoint location;
+@property (nonatomic, strong) NSPasteboard *pasteboard;
+@property (nonatomic, weak) NSWindow *window;
+@end
+
+@implementation DriverDrag
+@synthesize draggingFormation, animatesToDestination, numberOfValidItemsForDrop, springLoadingHighlight;
+- (NSWindow *)draggingDestinationWindow { return self.window; }
+- (NSDragOperation)draggingSourceOperationMask { return NSDragOperationCopy | NSDragOperationMove | NSDragOperationGeneric; }
+- (NSPoint)draggingLocation { return self.location; }
+- (NSPoint)draggedImageLocation { return self.location; }
+- (NSImage *)draggedImage { return nil; }
+- (NSPasteboard *)draggingPasteboard { return self.pasteboard; }
+- (id)draggingSource { return nil; }
+- (NSInteger)draggingSequenceNumber { return 1; }
+- (void)slideDraggedImageTo:(NSPoint)screenPoint {}
+- (NSArray<NSString *> *)namesOfPromisedFilesDroppedAtDestination:(NSURL *)dropDestination { return nil; }
+- (void)enumerateDraggingItemsWithOptions:(NSDraggingItemEnumerationOptions)options forView:(NSView *)view
+                                  classes:(NSArray<Class> *)classArray searchOptions:(NSDictionary *)searchOptions
+                               usingBlock:(void (^)(NSDraggingItem *, NSInteger, BOOL *))block {}
+- (void)resetSpringLoading {}
+@end
+
+static DriverDrag *activeDrag;
+static id dragTarget;
+static NSEventModifierFlags dragModifiers;
+
+// The app reads Cmd from +[NSEvent modifierFlags], which reports the real keyboard.
+static NSEventModifierFlags driverModifierFlags(id self, SEL _cmd) { return dragModifiers; }
+
+static void overrideModifierFlags(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        method_setImplementation(class_getClassMethod(NSEvent.class, @selector(modifierFlags)), (IMP)driverModifierFlags);
+    });
+}
+
+static NSString *operationName(NSDragOperation operation) {
+    if (operation == NSDragOperationNone) return @"none";
+    NSMutableArray *names = [NSMutableArray array];
+    if (operation & NSDragOperationCopy) [names addObject:@"copy"];
+    if (operation & NSDragOperationMove) [names addObject:@"move"];
+    if (operation & NSDragOperationGeneric) [names addObject:@"generic"];
+    return names.count ? [names componentsJoinedByString:@"+"] : [NSString stringWithFormat:@"0x%lx", (unsigned long)operation];
+}
+
+static void dragTo(CGFloat x, CGFloat y) {
+    NSWindow *window = mainWindow();
+    activeDrag.location = NSMakePoint(x, window.contentView.bounds.size.height - y);
+    id target = [window _findDragTargetFrom:activeDrag];
+    NSDragOperation operation = NSDragOperationNone;
+    if (target != dragTarget) {
+        if ([dragTarget respondsToSelector:@selector(draggingExited:)]) [dragTarget draggingExited:activeDrag];
+        dragTarget = target;
+        if ([target respondsToSelector:@selector(draggingEntered:)]) operation = [target draggingEntered:activeDrag];
+    }
+    if ([target respondsToSelector:@selector(draggingUpdated:)]) operation = [target draggingUpdated:activeDrag];
+    logLine(@"drag (%.0f,%.0f) target=%@ operation=%@", x, y, target ? NSStringFromClass([target class]) : @"(none)", operationName(operation));
+}
+
+// Paths are relative to the fixtures folder, so a drag can't pick up anything else.
+static void startDrag(NSString *paths, NSEventModifierFlags flags) {
+    NSString *fixtures = [NSString stringWithUTF8String:getenv("DRIVER_FIXTURES")];
+    NSMutableArray *urls = [NSMutableArray array];
+    for (NSString *path in [paths componentsSeparatedByString:@","]) {
+        [urls addObject:[NSURL fileURLWithPath:[fixtures stringByAppendingPathComponent:path]]];
+    }
+    overrideModifierFlags();
+    dragModifiers = flags;
+    activeDrag = [DriverDrag new];
+    activeDrag.window = mainWindow();
+    activeDrag.pasteboard = [NSPasteboard pasteboardWithUniqueName];
+    [activeDrag.pasteboard clearContents];
+    [activeDrag.pasteboard writeObjects:urls];
+    dragTarget = nil;
+}
+
+static void cancelDrag(void) {
+    if ([dragTarget respondsToSelector:@selector(draggingExited:)]) [dragTarget draggingExited:activeDrag];
+    activeDrag = nil;
+    dragTarget = nil;
+}
+
+static void finishDrop(void) {
+    id target = dragTarget;
+    BOOL prepared = ![target respondsToSelector:@selector(prepareForDragOperation:)] || [target prepareForDragOperation:activeDrag];
+    BOOL performed = prepared && [target respondsToSelector:@selector(performDragOperation:)] && [target performDragOperation:activeDrag];
+    if ([target respondsToSelector:@selector(concludeDragOperation:)]) [target concludeDragOperation:activeDrag];
+    logLine(@"drop target=%@ prepared=%d performed=%d", target ? NSStringFromClass([target class]) : @"(none)", prepared, performed);
+    activeDrag = nil;
+    dragTarget = nil;
+}
+
+// MARK: - Inspecting views
+
+// Rows live in AppKit tables, and the sidebar doesn't appear in snapshots, so this is
+// how to find a sidebar row's coordinates.
+static void logTables(NSView *view, NSView *root) {
+    if ([view isKindOfClass:NSTableView.class]) {
+        NSTableView *table = (NSTableView *)view;
+        NSRect frame = [table convertRect:table.bounds toView:nil];
+        logLine(@"table x=%.0f width=%.0f rows=%ld", frame.origin.x, frame.size.width, (long)table.numberOfRows);
+        CGFloat height = root.bounds.size.height;
+        for (NSInteger row = 0; row < table.numberOfRows; row++) {
+            NSRect rect = [table convertRect:[table rectOfRow:row] toView:nil];
+            logLine(@"  row %ld y=%.0f..%.0f", (long)row, height - NSMaxY(rect), height - NSMinY(rect));
+        }
+    }
+    for (NSView *subview in view.subviews) logTables(subview, root);
+}
+
+static void collectControls(NSView *view, NSMutableArray *texts, NSMutableArray<NSButton *> *buttons) {
+    if ([view isKindOfClass:NSButton.class]) [buttons addObject:(NSButton *)view];
+    else if ([view isKindOfClass:NSTextField.class]) [texts addObject:((NSTextField *)view).stringValue];
+    for (NSView *subview in view.subviews) collectControls(subview, texts, buttons);
+}
+
+static NSWindow *openSheet(void) {
+    for (NSWindow *window in NSApp.windows) {
+        if (window.isVisible && window.isSheet) return window;
+    }
+    return nil;
+}
+
+static void logAlert(void) {
+    NSWindow *sheet = openSheet();
+    if (!sheet) { logLine(@"alert: none open"); return; }
+    NSMutableArray *texts = [NSMutableArray array];
+    NSMutableArray<NSButton *> *buttons = [NSMutableArray array];
+    collectControls(sheet.contentView, texts, buttons);
+    NSMutableArray *titles = [NSMutableArray array];
+    for (NSButton *button in buttons) [titles addObject:button.title];
+    logLine(@"alert: %@ [%@]", [texts componentsJoinedByString:@" / "], [titles componentsJoinedByString:@" | "]);
+}
+
+static void pressButton(NSString *title) {
+    NSWindow *sheet = openSheet();
+    NSMutableArray *texts = [NSMutableArray array];
+    NSMutableArray<NSButton *> *buttons = [NSMutableArray array];
+    if (sheet) collectControls(sheet.contentView, texts, buttons);
+    for (NSButton *button in buttons) {
+        if ([button.title isEqual:title]) {
+            [button performClick:nil];
+            logLine(@"button: %@", title);
+            return;
+        }
+    }
+    logLine(@"WARNING: no alert button titled \"%@\"", title);
+}
+
 // MARK: - Context menus
 
 static void logMenu(void) {
@@ -216,6 +388,15 @@ static void measureStall(double seconds) {
     dispatch_resume(timer);
 }
 
+// MARK: - Opening files
+
+// Logs what the app hands to macOS instead of opening it, so a run shows what would
+// have opened without launching Preview or Finder and losing focus to them.
+static BOOL driverOpenURL(id self, SEL _cmd, NSURL *url) {
+    logLine(@"workspace open: %@", url.isFileURL ? url.path : url.absoluteString);
+    return YES;
+}
+
 // MARK: - Script runner
 
 static void runStep(NSString *line) {
@@ -255,6 +436,26 @@ static void runStep(NSString *line) {
         } else {
             logLine(@"WARNING: type dropped \"%@\", focus is on %@", rest, NSStringFromClass(responder.class));
         }
+    } else if ([command isEqual:@"drag"]) {
+        if (!getenv("DRIVER_FAVORITES")) {
+            logLine(@"ERROR: drag refused, the sidebar shows real favorites; pass --favorites to run");
+            quitNow(2);
+        }
+        if (args.count > 2) startDrag(args[2], parseModifiers([args subarrayWithRange:NSMakeRange(3, args.count - 3)]));
+        if (!activeDrag) { logLine(@"ERROR: drag has no active drag; name the files first"); quitNow(2); }
+        dragTo(args[0].doubleValue, args[1].doubleValue);
+    } else if ([command isEqual:@"drop"]) {
+        if (!activeDrag) { logLine(@"ERROR: drop has no active drag"); quitNow(2); }
+        finishDrop();
+    } else if ([command isEqual:@"dragcancel"]) {
+        cancelDrag();
+        logLine(@"dragcancel");
+    } else if ([command isEqual:@"tables"]) {
+        logTables(mainWindow().contentView, mainWindow().contentView);
+    } else if ([command isEqual:@"alert"]) {
+        logAlert();
+    } else if ([command isEqual:@"button"]) {
+        pressButton(rest);
     } else if ([command isEqual:@"menu"]) {
         logMenu();
     } else if ([command isEqual:@"pick"]) {
@@ -266,7 +467,10 @@ static void runStep(NSString *line) {
         }
         logLine(@"runloop mode: %@", NSRunLoop.currentRunLoop.currentMode);
     } else if ([command isEqual:@"snap"]) {
-        snap(args[0]);
+        snap(args[0], mainWindow().contentView);
+    } else if ([command isEqual:@"snapsidebar"]) {
+        // The window capture leaves the sidebar blank, but its table renders alone.
+        snap(args[0], firstTable(mainWindow().contentView));
     } else if ([command isEqual:@"pixel"]) {
         pixel(args[0].doubleValue, args[1].doubleValue, args.count > 2 ? args[2] : @"-");
     } else if ([command isEqual:@"touch"]) {
@@ -341,6 +545,8 @@ __attribute__((constructor)) static void start(void) {
         if (line.length && ![line hasPrefix:@"#"]) [lines addObject:line];
     }
     steps = lines;
+
+    method_setImplementation(class_getInstanceMethod(NSWorkspace.class, @selector(openURL:)), (IMP)driverOpenURL);
 
     [NSNotificationCenter.defaultCenter addObserverForName:NSMenuDidBeginTrackingNotification object:nil queue:nil
                                                 usingBlock:^(NSNotification *note) { openMenu = note.object; }];

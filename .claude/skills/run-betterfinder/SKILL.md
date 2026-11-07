@@ -50,14 +50,22 @@ A window appears on the real screen and takes focus for the length of the run.
 | `type <text>` | Insert text into the focused field, or warn if no text field has focus. |
 | `menu` | Log the open context menu's items. |
 | `pick <title>` | Choose an item from the open context menu. |
+| `drag <x> <y> <paths> [cmd]` | Start a simulated drag at a point and log the view that gets it. `paths` is comma-separated and relative to the fixtures folder. Needs `--favorites`. |
+| `drag <x> <y>` | Move the current drag to another point. |
+| `drop` | Drop at the current point. This acts for real. |
+| `dragcancel` | End the drag without dropping. |
+| `alert` | Log the open alert's text and buttons. |
+| `button <title>` | Press a button in the open alert. |
+| `tables` | Log each list's rows with their y coordinates. |
 | `snap <name>` | Save `<name>.png`, flattened onto white. |
+| `snapsidebar <name>` | Save the sidebar alone at 2x, which `snap` leaves blank. |
 | `pixel <x> <y> [label]` | Log RGBA at a point. Alpha 0 means nothing is drawn there. |
 | `stall <sec>` | Log the longest main-thread stall. Start it **before** the action. |
 | `touch <name>` | Create a file in the start folder (fixtures only). |
 | `windows` | Log the app's windows and run loop mode. |
 | `quit` | Exit now. The script also exits at its end. |
 
-`run` options: `--fixture NAME` or `--folder PATH` picks the start folder (default: `photos`), `--mode thumbnails|list` (default: `thumbnails`), `--tag NAME` picks the build, `--timeout SEC` sets the watchdog (default: 60).
+`run` options: `--fixture NAME` or `--folder PATH` picks the start folder (default: `photos`), `--mode thumbnails|list` (default: `thumbnails`), `--favorites A,B` replaces the sidebar favorites with fixture folders (`trash` means the real Trash), `--tag NAME` picks the build, `--timeout SEC` sets the watchdog (default: 60).
 
 ### Layout
 
@@ -66,6 +74,7 @@ Coordinates are points from the window's top-left, and snapshots are 2x, so halv
 - **Grid cells:** columns at x = 262, 407, 553, 698 and rows at y = 134, 273, 412. A cell's name is 51 points below its center, such as (407, 324).
 - **Selection in the grid:** sample 57 points left of the cell's center, such as `pixel 350 273` for the cell at (407, 273). Selected reads `rgba=(50,120,245,51)`, unselected reads `(0,0,0,0)`.
 - **List rows:** the first row is at y = 113, and each row is 20 points tall.
+- **Sidebar rows:** the first favorite is at y = 81 to 113, and each row is 32 points tall. A drop goes into a favorite only near the row's middle: about y = 85 to 109 and x = 15 to 164 on the first row. The rest of the row goes to the list, which adds a favorite. Use `tables` for rows further down.
 
 ### Recipes
 
@@ -124,6 +133,24 @@ EOF
 ls "$(.claude/skills/run-betterfinder/drive.sh path)/fixtures/photos" | grep renamed
 ```
 
+**Drop onto a sidebar favorite.** `fixtures` makes empty `dest/inbox` and `dest/archive` folders for this. Each `drag` line logs which view would take the drop: `PlatformDraggingDestinationView` is the row, and `SwiftUIOutlineListView` is the list, which adds a favorite.
+
+```bash
+.claude/skills/run-betterfinder/drive.sh fixtures
+.claude/skills/run-betterfinder/drive.sh run --out drop --favorites dest/inbox,dest/archive <<'EOF'
+wait 3
+drag 90 97 photos/IMG_0001.jpg
+wait 0.3
+snapsidebar hovering
+drop
+wait 0.8
+alert
+button Move
+wait 1.2
+EOF
+ls "$(.claude/skills/run-betterfinder/drive.sh path)/fixtures/dest/inbox"
+```
+
 **Open a folder.**
 
 ```bash
@@ -134,6 +161,19 @@ wait 0.4
 dclick 262 134
 wait 1.5
 snap opened
+EOF
+```
+
+**Open a link.** `fixtures` makes a `links` folder with one of each kind, in this order from y = 113, 20 points apart: `real-folder`, `alias-to-folder`, `broken`, `loop`, `Notes.rtfd`, `to-file`, `to-folder`, `to-link`, `to-package`. Opening a folder drops the list from 9 rows to 1, and anything else logs `workspace open`.
+
+```bash
+.claude/skills/run-betterfinder/drive.sh run --out link --fixture links --mode list <<'EOF'
+wait 1
+move 270 233
+wait 0.2
+dclick 270 233
+wait 0.7
+tables
 EOF
 ```
 
@@ -189,14 +229,14 @@ There is no test suite. Verify changes with the driver.
 
 ## Gotchas
 
-- **`pick` and `type` act for real.** Move to Trash really trashes. Keep them on fixtures. `--folder` is for read-only looking at real folders, such as a network volume, and `touch` refuses to run there. Give network folders a longer first `wait` (12 seconds worked for 23 photos on a NAS).
+- **`pick`, `type`, and `drop` act for real.** Move to Trash really trashes. Keep them on fixtures. `drag` refuses to run without `--favorites`, so a drop can't land in your real Desktop or Documents. A drop on `trash` puts the file in your real Trash, so delete it from there afterwards. `--folder` is for read-only looking at real folders, such as a network volume, and `touch` refuses to run there. Give network folders a longer first `wait` (12 seconds worked for 23 photos on a NAS).
 - **`dclick` without `move` only selects.** The app ignores double-clicks unless `.onHover` reports the mouse over the view, and synthetic clicks don't produce hover. The log looks clean either way, so check the path bar or the Back arrow.
 - **`key return` doesn't open items in the grid.** Its `.onKeyPress` needs keyboard focus that the scroll view doesn't have. Use `move` then `dclick`.
-- **Double-clicking a JPEG launches Preview,** which takes focus and leaves a window open. Test opening with `--fixture nested`.
+- **Nothing really opens.** The driver catches what the app hands to macOS and logs `workspace open: <path>` instead, so double-clicking a JPEG won't launch Preview. That line is how to tell "the app went into it" from "macOS would have opened it". "Open With" isn't caught, and it does launch the app.
 - **`stall` after a click under-reports badly.** The work has already finished by the next step, and it read 4.5ms for a click that really took over 40ms. Start it first, then `wait` longer than its duration.
 - **Debug builds overstate SwiftUI cost.** One click measured about 118ms in Debug and 83ms in Release. Identical builds also vary between runs (33 to 53ms in one case), so don't read much into a single run.
-- **Drag and drop can't be driven,** and clicks on the sidebar are untested. Verify those by hand.
-- **Snapshots skip the sidebar and window chrome.** They render blank, which isn't a bug in the app. The left 180 points of a snapshot are empty.
+- **`drag` only simulates the start of a drag.** A real one needs the window server, so `drag` skips the source, asks AppKit for the destination view, and then runs the real SwiftUI drop. It proves what a drop does, not that a drag starts from a row, so check that by hand.
+- **`snap` skips the sidebar and window chrome.** They render blank, which isn't a bug in the app, and the left 180 points of a snapshot are empty. Use `snapsidebar` for the sidebar.
 - **Cmd+A acts oddly under the driver.** With nothing selected it does nothing, and after a selection it reports one item fewer than it highlights. Don't treat it as a reliable way to select everything.
 - **SourceKit errors like `Cannot find type 'FileListViewModel' in scope` are noise** from single-file indexing. Trust `xcodebuild`.
 - **Editing `driver.m`: post events with `postEvent`, never `sendEvent`.** `sendEvent` bypasses the queue, so `NSTableView`'s tracking loop never sees the mouse-up and the app hangs.
@@ -207,7 +247,7 @@ There is no test suite. Verify changes with the driver.
 ## Troubleshooting
 
 - **`error: another driven instance is running (pid N)`:** two copies fight over focus and the loser's results are invalid. Let it finish, or kill that pid. If `ps -o ppid,command -p N` shows parent 1 and no arguments, it's a test copy reopened after a crash, and it's safe to kill.
-- **`INVALID RUN`, exit 4:** a `WARNING` was logged. Either the window lost focus mid-run or `type` found no text field. Clicks on an unfocused window don't behave normally, so discard the results and run again. `focus: <app> became active` lines in the log name what took it. If the developer is using the Mac, that can hit every run, so wait until they're done rather than retrying.
+- **`INVALID RUN`, exit 4:** a `WARNING` was logged. Either the window lost focus mid-run or `type` found no text field. Clicks on an unfocused window don't behave normally, so discard the results and run again. `focus: <app> became active` lines in the log name what took it. If the developer is using the Mac, that can hit every run, so wait until they're done rather than retrying, or put the clicks in the first second (`wait 0.25`, not `wait 3`). `drag` and `drop` don't check focus, and their results didn't depend on it.
 - **`WATCHDOG: exceeded Ns, stuck at step: ...`, exit 124:** the step wedged the main thread, or the script simply outlasted `--timeout`. Raise the timeout, or look at `app.log`.
 - **`menu: no context menu is open`:** nothing was under the point, or the `wait` after `rclick` was too short. The `windows` step shows an `NSPopupMenuWindow` when a menu is really open.
 - **`error: no build for tag 'NAME'`:** run `drive.sh build --tag NAME` first.

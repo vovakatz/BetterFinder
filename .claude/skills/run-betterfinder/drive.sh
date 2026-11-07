@@ -4,7 +4,7 @@
 #   drive.sh build [--release] [--tag NAME] [--ref GIT_REF]
 #   drive.sh fixtures [--count N] [--name NAME]
 #   drive.sh run --out NAME [--tag NAME] [--fixture NAME | --folder PATH]
-#                [--mode thumbnails|list] [--timeout SECONDS] < script
+#                [--mode thumbnails|list] [--favorites A,B] [--timeout SECONDS] < script
 #   drive.sh path
 #   drive.sh clean
 set -euo pipefail
@@ -82,10 +82,42 @@ cmd_fixtures() {
     # A folder to open, since double-clicking a JPEG would launch Preview.
     mkdir -p "$WORK/fixtures/nested/Album"
     touch "$WORK/fixtures/nested/Album/inside.txt"
+    # Empty folders to use as drop targets, since a drop really moves files.
+    rm -rf "${WORK:?}/fixtures/dest"
+    mkdir -p "$WORK/fixtures/dest/inbox" "$WORK/fixtures/dest/archive"
+    # One of each kind of link. The app loads them all as files, whatever they point to.
+    local links="$WORK/fixtures/links"
+    rm -rf "$links"
+    mkdir -p "$links/real-folder" "$links/Notes.rtfd"
+    touch "$links/real-folder/inside.txt"
+    ln -s real-folder "$links/to-folder"
+    ln -s to-folder "$links/to-link"
+    ln -s real-folder/inside.txt "$links/to-file"
+    ln -s Notes.rtfd "$links/to-package"
+    ln -s nowhere "$links/broken"
+    ln -s loop "$links/loop"
+    "$WORK/make_fixtures" --alias "$links/real-folder" "$links/alias-to-folder"
+}
+
+# The app stores favorites as JSON in a Data default, and a plist-style <hex> launch
+# argument sets one. Names are fixture paths; "trash" is the real Trash.
+favorites_hex() {
+    local json="" separator="" name path
+    local -a names
+    IFS=, read -ra names <<<"$1"
+    for name in "${names[@]}"; do
+        path="$WORK/fixtures/$name"
+        # The trailing slash matches how the app stores it, and SidebarItem.isTrash needs it.
+        [ "$name" = trash ] && path="$HOME/.Trash/"
+        [ "$name" = trash ] || [ -d "$path" ] || die "favorite is not a fixture folder: $name"
+        json+="$separator{\"path\":\"$path\",\"name\":\"${name##*/}\",\"icon\":\"folder\",\"isDefault\":false}"
+        separator=,
+    done
+    printf '[%s]' "$json" | xxd -p | tr -d '\n'
 }
 
 cmd_run() {
-    local out="" tag=current folder="$WORK/fixtures/photos" mode=thumbnails timeout=60
+    local out="" tag=current folder="$WORK/fixtures/photos" mode=thumbnails timeout=60 favorites=""
     while [ $# -gt 0 ]; do
         case "$1" in
             --out) out="$2"; shift 2 ;;
@@ -93,6 +125,7 @@ cmd_run() {
             --fixture) folder="$WORK/fixtures/$2"; shift 2 ;;
             --folder) folder="$2"; shift 2 ;;
             --mode) mode="$2"; shift 2 ;;
+            --favorites) favorites="$2"; shift 2 ;;
             --timeout) timeout="$2"; shift 2 ;;
             *) die "unknown run option: $1" ;;
         esac
@@ -116,6 +149,12 @@ cmd_run() {
     mkdir -p "$dir"
     cat >"$dir/script.txt"
 
+    local -a favorite_args=()
+    if [ -n "$favorites" ]; then
+        favorite_args=(-SidebarFavorites "<$(favorites_hex "$favorites")>")
+        export DRIVER_FAVORITES=1
+    fi
+
     local status=0
     DRIVER_SCRIPT="$dir/script.txt" DRIVER_OUT="$dir" DRIVER_TIMEOUT="$timeout" \
     DRIVER_FOLDER="$folder" DRIVER_FIXTURES="$WORK/fixtures" \
@@ -125,6 +164,7 @@ cmd_run() {
         -settings.general.defaultLocation custom \
         -settings.general.customDefaultLocationPath "$folder" \
         -ApplePersistenceIgnoreState YES \
+        ${favorite_args[@]+"${favorite_args[@]}"} \
         >"$dir/app.log" 2>&1 || status=$?
     remove_app_state
 
