@@ -1092,7 +1092,11 @@ final class FileListViewModel {
         guard !toMove.isEmpty else { return }
         pendingMoveURLs = toMove
         pendingMoveDestination = dest
-        showMoveConfirmation = true
+        if AppSettings.shared.confirmBeforeMoveOrCopy {
+            showMoveConfirmation = true
+        } else {
+            confirmMoveItems()
+        }
     }
 
     func confirmMoveItems() {
@@ -1111,7 +1115,11 @@ final class FileListViewModel {
         guard !toCopy.isEmpty else { return }
         pendingCopyURLs = toCopy
         pendingCopyDestination = dest
-        showCopyConfirmation = true
+        if AppSettings.shared.confirmBeforeMoveOrCopy {
+            showCopyConfirmation = true
+        } else {
+            confirmCopyItems()
+        }
     }
 
     func confirmCopyItems() {

@@ -23,6 +23,14 @@ struct GeneralSettingsView: View {
             }
 
             Section {
+                Toggle("Confirmation before move or copy", isOn: $settings.confirmBeforeMoveOrCopy)
+            } footer: {
+                Text("Ask before moving or copying items with drag and drop.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Set as the default file browser", isOn: $isDefaultFolderHandler)
             } footer: {
                 Text("Folders opened from Terminal and other apps will open in BetterFinder instead of Finder. \"Reveal in Finder\" actions in other apps still go to Finder.")

@@ -29,6 +29,7 @@ final class AppSettings {
         static let defaultSortCriteria = "settings.general.defaultSortCriteria"
         static let defaultViewMode = "settings.general.defaultViewMode"
         static let terminalBundleID = "settings.general.terminalBundleID"
+        static let confirmBeforeMoveOrCopy = "settings.general.confirmBeforeMoveOrCopy"
     }
 
     var showHiddenFilesByDefault: Bool {
@@ -63,6 +64,10 @@ final class AppSettings {
         didSet { UserDefaults.standard.set(terminalBundleID, forKey: Keys.terminalBundleID) }
     }
 
+    var confirmBeforeMoveOrCopy: Bool {
+        didSet { UserDefaults.standard.set(confirmBeforeMoveOrCopy, forKey: Keys.confirmBeforeMoveOrCopy) }
+    }
+
     private init() {
         let defaults = UserDefaults.standard
 
@@ -94,6 +99,10 @@ final class AppSettings {
 
         let storedTerminal = defaults.string(forKey: Keys.terminalBundleID) ?? ""
         self.terminalBundleID = storedTerminal.isEmpty ? TerminalAppOption.defaultBundleID : storedTerminal
+
+        // On unless the user has turned it off, and `bool(forKey:)` reads a missing value as off.
+        self.confirmBeforeMoveOrCopy = defaults.object(forKey: Keys.confirmBeforeMoveOrCopy) == nil
+            || defaults.bool(forKey: Keys.confirmBeforeMoveOrCopy)
     }
 
     /// Returns the URL a fresh pane should open to, based on `defaultLocation`.
