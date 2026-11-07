@@ -364,9 +364,19 @@ final class FileListViewModel {
             Task { await attemptMount(item.url, credentials: creds) }
         } else if item.isDirectory {
             navigate(to: item.url)
+        } else if let folder = linkedFolder(of: item.url) {
+            navigate(to: folder)
         } else {
             NSWorkspace.shared.open(item.url)
         }
+    }
+
+    /// The folder a symlink or Finder alias points to, if any. Links load as
+    /// files, because reading a link's properties doesn't follow it.
+    private func linkedFolder(of url: URL) -> URL? {
+        guard let target = try? URL(resolvingAliasFileAt: url, options: [.withoutUI, .withoutMounting]),
+              target.isDirectory, !target.isPackage else { return nil }
+        return target
     }
 
     func goBack() {
