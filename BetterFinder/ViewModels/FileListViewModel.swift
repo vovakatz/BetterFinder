@@ -47,10 +47,7 @@ final class FileListViewModel {
         }
     }
 
-    /// The current selection. Reading this via the normal getter registers
-    /// @Observable tracking, which is appropriate for widgets that should
-    /// update when the selection changes. For the file list binding, use
-    /// ``selectedItemsUntracked`` to avoid triggering a full List re-render.
+    /// The current selection.
     var selectedItems: Set<URL> {
         get {
             access(keyPath: \.selectedItems)
@@ -64,12 +61,6 @@ final class FileListViewModel {
         }
     }
 
-    /// Returns the current selection without registering @Observable tracking.
-    /// Used by the List's selection binding to prevent the expensive List body
-    /// from being re-evaluated on every selection change.
-    func selectedItemsUntracked() -> Set<URL> {
-        _selectedItems
-    }
     var viewMode: ViewMode = .list
     @ObservationIgnored private var _searchFilter: String = ""
     var searchFilter: String {

@@ -82,6 +82,7 @@ struct FileListView: View {
     @State private var sizeWidth: CGFloat = 80
     @State private var kindWidth: CGFloat = 120
     @State private var doubleClickProxy = DoubleClickProxy()
+    @State private var rowActions = FileRowActions()
     @Binding var showNewFolderSheet: Bool
     @Binding var showNewFileSheet: Bool
     @State private var newItemName = ""
@@ -257,30 +258,26 @@ struct FileListView: View {
     }
 
     private func listView(effWidths: (date: CGFloat, size: CGFloat, kind: CGFloat)) -> some View {
-        let resolveDeferredIcons = displayItems.count <= 400
+        rowActions.toggleExpand = onToggleExpand
+        rowActions.commitRename = commitRename
+        rowActions.cancelRename = cancelRename
+        rowActions.nameHover = handleNameHover
+        rowActions.dropIntoFolder = onDropIntoFolder
+        rowActions.drop = onDrop
 
-        return List(displayItems, selection: $selection) { displayItem in
-            FileRowView(
-                item: displayItem.fileItem,
-                dateWidth: effWidths.date,
-                sizeWidth: effWidths.size,
-                kindWidth: effWidths.kind,
-                depth: displayItem.depth,
-                isExpanded: expandedFolders.contains(displayItem.fileItem.url),
-                onToggleExpand: { onToggleExpand(displayItem.fileItem) },
-                isRenaming: renamingURL == displayItem.id,
-                resolveDeferredIcon: resolveDeferredIcons,
-                renameText: $renameText,
-                onCommitRename: { commitRename(for: displayItem.id) },
-                onCancelRename: { cancelRename() },
-                onNameHover: { handleNameHover($0, for: displayItem.id) }
+        return List(selection: $selection) {
+            FileListRows(
+                items: displayItems,
+                inputs: FileListRowInputs(
+                    dateWidth: effWidths.date,
+                    sizeWidth: effWidths.size,
+                    kindWidth: effWidths.kind,
+                    expandedFolders: expandedFolders,
+                    renamingURL: renamingURL
+                ),
+                actions: rowActions,
+                renameText: $renameText
             )
-            .listRowInsets(EdgeInsets(top: 2, leading: FileListLayout.rowExplicitLeading, bottom: 2, trailing: FileListLayout.rowExplicitLeading))
-            .draggable(displayItem.fileItem.url) {
-                FileDragPreview(item: displayItem.fileItem)
-            }
-            .itemDropDestination(item: displayItem, onDropIntoFolder: onDropIntoFolder, onDrop: onDrop)
-            .tag(displayItem.id)
         }
         .listStyle(.plain)
         .alternatingRowBackgrounds()
@@ -744,6 +741,68 @@ private struct FileDragPreview: View {
         .padding(.vertical, 4)
         .background(.background)
         .cornerRadius(4)
+    }
+}
+
+/// Everything a row's appearance depends on, besides the item itself.
+private struct FileListRowInputs: Equatable {
+    let dateWidth: CGFloat
+    let sizeWidth: CGFloat
+    let kindWidth: CGFloat
+    let expandedFolders: Set<URL>
+    let renamingURL: URL?
+}
+
+/// What a row can do. A class because SwiftUI compares it by identity, while a
+/// closure would make `FileListRows` look changed on every update.
+private final class FileRowActions {
+    var toggleExpand: (FileItem) -> Void = { _ in }
+    var commitRename: (URL) -> Void = { _ in }
+    var cancelRename: () -> Void = {}
+    var nameHover: (Bool, URL) -> Void = { _, _ in }
+    var dropIntoFolder: ([URL], URL, Bool) -> Void = { _, _, _ in }
+    var drop: ([URL], Bool) -> Void = { _, _ in }
+}
+
+/// The list's rows. The List has to see every selection change, or it hands back
+/// a selection missing what was already selected. Nothing here depends on the
+/// selection, so SwiftUI skips this view then, instead of re-comparing every row.
+private struct FileListRows: View {
+    let items: [DisplayItem]
+    let inputs: FileListRowInputs
+    let actions: FileRowActions
+    @Binding var renameText: String
+
+    var body: some View {
+        let resolveDeferredIcons = items.count <= 400
+
+        ForEach(items) { displayItem in
+            FileRowView(
+                item: displayItem.fileItem,
+                dateWidth: inputs.dateWidth,
+                sizeWidth: inputs.sizeWidth,
+                kindWidth: inputs.kindWidth,
+                depth: displayItem.depth,
+                isExpanded: inputs.expandedFolders.contains(displayItem.fileItem.url),
+                onToggleExpand: { actions.toggleExpand(displayItem.fileItem) },
+                isRenaming: inputs.renamingURL == displayItem.id,
+                resolveDeferredIcon: resolveDeferredIcons,
+                renameText: $renameText,
+                onCommitRename: { actions.commitRename(displayItem.id) },
+                onCancelRename: { actions.cancelRename() },
+                onNameHover: { actions.nameHover($0, displayItem.id) }
+            )
+            .listRowInsets(EdgeInsets(top: 2, leading: FileListLayout.rowExplicitLeading, bottom: 2, trailing: FileListLayout.rowExplicitLeading))
+            .draggable(displayItem.fileItem.url) {
+                FileDragPreview(item: displayItem.fileItem)
+            }
+            .itemDropDestination(
+                item: displayItem,
+                onDropIntoFolder: { actions.dropIntoFolder($0, $1, $2) },
+                onDrop: { actions.drop($0, $1) }
+            )
+            .tag(displayItem.id)
+        }
     }
 }
 

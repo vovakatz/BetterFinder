@@ -64,8 +64,6 @@ struct MainContentView: View, Equatable {
 /// re-created when unrelated parent state changes (panel toggles, sidebar
 /// clicks, etc.).  Only @Observable changes to the ViewModel's data
 /// properties (displayItems, isLoading, etc.) trigger body re-evaluation.
-/// Selection updates flow through the lazy Binding without re-creating
-/// the underlying List.
 private struct StableFileList: View, Equatable {
     var viewModel: FileListViewModel
     @Binding var showNewFolderSheet: Bool
@@ -76,18 +74,13 @@ private struct StableFileList: View, Equatable {
     }
 
     var body: some View {
-        // Use untracked getter so the List's internal rendering does NOT
-        // register @Observable tracking on selectedItems — preventing
-        // a full 5K-row re-render on every selection change.
+        // Tracked on purpose: a List that doesn't see selection changes hands
+        // back a selection missing what was already selected. `FileListRows`
+        // is what keeps those updates cheap in a big folder.
         let selectionBinding = Binding(
-            get: { viewModel.selectedItemsUntracked() },
+            get: { viewModel.selectedItems },
             set: { viewModel.selectedItems = $0 }
         )
-
-        // AppKit draws the List's highlight, but the thumbnail grid draws its
-        // own in SwiftUI from `selection`, so it must re-render when selection
-        // changes. Track it in that mode only, so the List stays untracked.
-        let _ = viewModel.viewMode == .thumbnails ? viewModel.selectedItems : []
 
         FileListView(
             displayItems: viewModel.displayItems,
