@@ -161,6 +161,22 @@ static void moveMouse(CGFloat x, CGFloat y) {
     }
 }
 
+// Scrolls the scroll view under the point down by `points` (negative scrolls up). It
+// moves the scroll view directly: a synthetic scroll-wheel event didn't move it.
+static void scrollAt(CGFloat x, CGFloat y, CGFloat points) {
+    NSWindow *window = mainWindow();
+    NSPoint point = NSMakePoint(x, window.contentView.bounds.size.height - y);
+    NSView *view = [window.contentView.superview hitTest:point];
+    NSScrollView *scrollView = view.enclosingScrollView;
+    if (!scrollView) { logLine(@"WARNING: scroll found no scroll view under (%.0f,%.0f)", x, y); return; }
+    NSClipView *clip = scrollView.contentView;
+    NSPoint origin = clip.bounds.origin;
+    origin.y += clip.isFlipped ? points : -points;
+    [clip scrollToPoint:[clip constrainBoundsRect:(NSRect){origin, clip.bounds.size}].origin];
+    [scrollView reflectScrolledClipView:clip];
+    logLine(@"scroll %@ to y=%.0f", NSStringFromClass(scrollView.class), clip.bounds.origin.y);
+}
+
 static NSEventModifierFlags parseModifiers(NSArray<NSString *> *names) {
     NSEventModifierFlags flags = 0;
     for (NSString *name in names) {
@@ -297,9 +313,11 @@ static void logTables(NSView *view, NSView *root) {
     if ([view isKindOfClass:NSTableView.class]) {
         NSTableView *table = (NSTableView *)view;
         NSRect frame = [table convertRect:table.bounds toView:nil];
-        logLine(@"table x=%.0f width=%.0f rows=%ld", frame.origin.x, frame.size.width, (long)table.numberOfRows);
+        logLine(@"table x=%.0f width=%.0f rows=%ld selected=%lu", frame.origin.x, frame.size.width, (long)table.numberOfRows,
+                (unsigned long)table.selectedRowIndexes.count);
         CGFloat height = root.bounds.size.height;
-        for (NSInteger row = 0; row < table.numberOfRows; row++) {
+        // A big folder would flood the log, and its rows are all the same height anyway.
+        for (NSInteger row = 0; row < MIN(table.numberOfRows, 40); row++) {
             NSRect rect = [table convertRect:[table rectOfRow:row] toView:nil];
             logLine(@"  row %ld y=%.0f..%.0f", (long)row, height - NSMaxY(rect), height - NSMinY(rect));
         }
@@ -366,6 +384,22 @@ static void pickMenuItem(NSString *title) {
         [NSApp sendAction:item.action to:item.target from:item];
         logLine(@"pick: %@", title);
     });
+}
+
+// Runs a menu bar item the way choosing it would, for shortcuts that synthetic keys
+// don't reach. Cmd+Delete is one.
+static BOOL chooseMenuItem(NSMenu *menu, NSString *title) {
+    [menu update];
+    for (NSMenuItem *item in menu.itemArray) {
+        if ([item.title isEqual:title]) {
+            if (!item.isEnabled) { logLine(@"WARNING: menu item \"%@\" is disabled", title); return YES; }
+            [menu performActionForItemAtIndex:[menu indexOfItem:item]];
+            logLine(@"mainmenu: %@", title);
+            return YES;
+        }
+        if (item.submenu && chooseMenuItem(item.submenu, title)) return YES;
+    }
+    return NO;
 }
 
 // MARK: - Measurement
@@ -459,6 +493,15 @@ static void runStep(NSString *line) {
         logAlert();
     } else if ([command isEqual:@"button"]) {
         pressButton(rest);
+    } else if ([command isEqual:@"activate"]) {
+        // Takes focus back from an app that grabbed it. Activation is asynchronous.
+        [NSApp activateIgnoringOtherApps:YES];
+        [mainWindow() makeKeyAndOrderFront:nil];
+        logLine(@"activate");
+    } else if ([command isEqual:@"scroll"]) {
+        scrollAt(args[0].doubleValue, args[1].doubleValue, args[2].doubleValue);
+    } else if ([command isEqual:@"mainmenu"]) {
+        if (!chooseMenuItem(NSApp.mainMenu, rest)) logLine(@"WARNING: no menu bar item titled \"%@\"", rest);
     } else if ([command isEqual:@"usewindow"]) {
         // Later steps act on the window with this title. "main" goes back.
         targetWindow = nil;

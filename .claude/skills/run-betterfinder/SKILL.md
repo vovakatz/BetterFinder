@@ -56,13 +56,16 @@ A window appears on the real screen and takes focus for the length of the run.
 | `dragcancel` | End the drag without dropping. |
 | `alert` | Log the open alert's text and buttons. |
 | `button <title>` | Press a button in the open alert. |
-| `tables` | Log each list's rows with their y coordinates. |
+| `tables` | Log each list's row count, selected row count, and the y coordinates of its first 40 rows. |
 | `snap <name>` | Save `<name>.png`, flattened onto white. |
 | `snapsidebar <name>` | Save the sidebar alone at 2x, which `snap` leaves blank. |
 | `pixel <x> <y> [label]` | Log RGBA at a point. Alpha 0 means nothing is drawn there. |
 | `stall <sec>` | Log the longest main-thread stall. Start it **before** the action. |
 | `touch <name>` | Create a file in the start folder (fixtures only). |
 | `windows` | Log the app's windows, with titles, and the run loop mode. |
+| `activate` | Take focus back from another app. Wait about 0.25 seconds after it. |
+| `scroll <x> <y> <points>` | Scroll the scroll view under a point down by that many points. Negative scrolls up. |
+| `mainmenu <title>` | Choose a menu bar item. Cmd+Delete doesn't get through as a `key` step. |
 | `usewindow <title>` | Make later steps act on the window with this title. `usewindow main` goes back. |
 | `default <key>` | Log a stored setting. Blank means it was never set. |
 | `quit` | Exit now. The script also exits at its end. |
@@ -256,7 +259,10 @@ There is no test suite. Verify changes with the driver.
 - **Debug builds overstate SwiftUI cost.** One click measured about 118ms in Debug and 83ms in Release. Identical builds also vary between runs (33 to 53ms in one case), so don't read much into a single run.
 - **`drag` only simulates the start of a drag.** A real one needs the window server, so `drag` skips the source, asks AppKit for the destination view, and then runs the real SwiftUI drop. It proves what a drop does, not that a drag starts from a row, so check that by hand.
 - **`snap` skips the sidebar and window chrome.** They render blank, which isn't a bug in the app, and the left 180 points of a snapshot are empty. Use `snapsidebar` for the sidebar.
-- **Cmd+A acts oddly under the driver.** With nothing selected it does nothing, and after a selection it reports one item fewer than it highlights. Don't treat it as a reliable way to select everything.
+- **The List must keep tracking the selection.** With an untracked binding it hands back a selection missing what was already selected, so Cmd+A and Cmd-click come up short of what's highlighted. `FileListRows` keeps that tracking cheap, and it only works if nothing in it changes on a selection change: no closures, and no `.equatable()`, which collapses every row into one (`tables` shows `rows=1`). `tables` reports the highlighted count, so compare it with a snapshot of the status bar.
+- **A plain click on a row already in a multi-selection keeps everything selected,** both before and after that fix. Click an unselected row to collapse the selection.
+- **Cmd+A needs focus on the file list.** With nothing clicked in list view, and in gallery view even after a click, it selected nothing. Check a run really selected everything before trusting its timing: `tables` should show `selected=` equal to `rows=`.
+- **To find where main-thread time goes, use `sample <pid> 6 5 -file out.txt`** while the run is going. It works on the test build, and the slow code shows up in the main thread's call tree.
 - **SourceKit errors like `Cannot find type 'FileListViewModel' in scope` are noise** from single-file indexing. Trust `xcodebuild`.
 - **Editing `driver.m`: post events with `postEvent`, never `sendEvent`.** `sendEvent` bypasses the queue, so `NSTableView`'s tracking loop never sees the mouse-up and the app hangs.
 - **Editing `driver.m`: keep hover on hosting views.** List rows have their own `CellHostingView`, so `move` walks the views under the point. Sending `mouseEntered:` to the window frame raises an exception.
@@ -266,7 +272,7 @@ There is no test suite. Verify changes with the driver.
 ## Troubleshooting
 
 - **`error: another driven instance is running (pid N)`:** two copies fight over focus and the loser's results are invalid. Let it finish, or kill that pid. If `ps -o ppid,command -p N` shows parent 1 and no arguments, it's a test copy reopened after a crash, and it's safe to kill.
-- **`INVALID RUN`, exit 4:** a `WARNING` was logged. Either the window lost focus mid-run or `type` found no text field. Clicks on an unfocused window don't behave normally, so discard the results and run again. `focus: <app> became active` lines in the log name what took it. If the developer is using the Mac, that can hit every run, so wait until they're done rather than retrying, or put the clicks in the first second (`wait 0.25`, not `wait 3`). `drag` and `drop` don't check focus, and their results didn't depend on it.
+- **`INVALID RUN`, exit 4:** a `WARNING` was logged. Either the window lost focus mid-run or `type` found no text field. Clicks on an unfocused window don't behave normally, so discard the results and run again. `focus: <app> became active` lines in the log name what took it. If the developer is using the Mac, that can hit every run, so wait until they're done rather than retrying, or put the clicks in the first second (`wait 0.25`, not `wait 3`). If the folder needs longer to load, use `activate` and finish within a second of it: Chrome took focus back 1 to 2 seconds later. `drag` and `drop` don't check focus, and their results didn't depend on it.
 - **`WATCHDOG: exceeded Ns, stuck at step: ...`, exit 124:** the step wedged the main thread, or the script simply outlasted `--timeout`. Raise the timeout, or look at `app.log`.
 - **`menu: no context menu is open`:** nothing was under the point, or the `wait` after `rclick` was too short. The `windows` step shows an `NSPopupMenuWindow` when a menu is really open.
 - **`error: no build for tag 'NAME'`:** run `drive.sh build --tag NAME` first.
