@@ -336,11 +336,17 @@ struct InfoWidgetView: View {
     // MARK: - Multi-Select
 
     private var multiSelectView: some View {
-        let sorted = selectedURLs.sorted {
-            $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending
-        }
+        // Each name is read once: reading it inside the comparison repeats that
+        // about 120,000 times for 5,000 files.
+        let sorted = selectedURLs
+            .map { (name: $0.lastPathComponent, url: $0) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            .map(\.url)
         return ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
+            // Lazy, so rows and their icons are only made as they scroll into
+            // view. With every row made up front, Cmd+A in a 5,000-file folder
+            // froze for six seconds. Details already load on expand.
+            LazyVStack(alignment: .leading, spacing: 0) {
                 tagsRow(for: Array(selectedURLs))
                     .padding(.horizontal, 8)
                     .padding(.top, 8)
