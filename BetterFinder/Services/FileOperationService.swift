@@ -89,11 +89,14 @@ struct FileOperationService: Sendable {
 
     private enum FileOperationError: LocalizedError {
         case destinationInsideSource
+        case destinationExists(String)
 
         var errorDescription: String? {
             switch self {
             case .destinationInsideSource:
                 return "You can't copy or move a folder into itself."
+            case .destinationExists(let name):
+                return "An item named “\(name)” already exists in the destination."
             }
         }
     }
@@ -141,10 +144,18 @@ struct FileOperationService: Sendable {
         planLoop: for plan in plans {
             if isCancelled() { break }
 
+            // Partial-transfer cleanup deletes `plan.destination`, so it must
+            // only run once that path holds nothing but what this plan wrote.
+            var ownsDestination = false
+
             do {
-                if overwrite && fileManager.fileExists(atPath: plan.destination.path) {
+                if itemExists(at: plan.destination, fileManager: fileManager) {
+                    guard overwrite else {
+                        throw FileOperationError.destinationExists(plan.destination.lastPathComponent)
+                    }
                     try fileManager.removeItem(at: plan.destination)
                 }
+                ownsDestination = true
 
                 if plan.usesDirectMove {
                     try fileManager.moveItem(at: plan.source, to: plan.destination)
@@ -208,7 +219,7 @@ struct FileOperationService: Sendable {
 
                 completedSources.insert(plan.source)
             } catch {
-                if !plan.usesDirectMove {
+                if ownsDestination && !plan.usesDirectMove {
                     try? cleanupPartialTransfer(at: plan.destination, fileManager: fileManager)
                 }
                 errors.append(errorMessage(for: operation, source: plan.source, error: error))
@@ -289,8 +300,14 @@ struct FileOperationService: Sendable {
     }
 
     private nonisolated func cleanupPartialTransfer(at destination: URL, fileManager: FileManager) throws {
-        guard fileManager.fileExists(atPath: destination.path) else { return }
+        guard itemExists(at: destination, fileManager: fileManager) else { return }
         try fileManager.removeItem(at: destination)
+    }
+
+    /// Unlike `fileExists(atPath:)`, this doesn't follow a symlink, so a
+    /// broken link still counts as an item in the way.
+    private nonisolated func itemExists(at url: URL, fileManager: FileManager) -> Bool {
+        (try? fileManager.attributesOfItem(atPath: url.path)) != nil
     }
 
     private nonisolated func isSameVolume(_ source: URL, _ destinationDirectory: URL) -> Bool {
