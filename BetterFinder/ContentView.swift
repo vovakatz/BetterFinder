@@ -95,6 +95,7 @@ struct ContentView: View {
     @AppStorage("rightBottomWidgetRaw") private var rightBottomWidgetRaw: String = "Preview"
     @AppStorage("bottomPanelWidgetRaw") private var bottomPanelWidgetRaw: String = "Terminal"
     @State private var clipboardService = ClipboardService()
+    @State private var fileOperationQueue = FileOperationQueue()
     @State private var showDualPane: Bool = false
     @State private var dualPaneSplitFraction: Double = 0.5
     @State private var secondFileListVM = FileListViewModel()
@@ -123,17 +124,6 @@ struct ContentView: View {
         } else {
             activeVM.requestMoveItems(urls, destination: favorite.url)
         }
-    }
-
-    private var fileOperationOwner: FileListViewModel? {
-        if activeVM.fileOperationProgress != nil { return activeVM }
-        if fileListVM.fileOperationProgress != nil { return fileListVM }
-        if secondFileListVM.fileOperationProgress != nil { return secondFileListVM }
-        return nil
-    }
-
-    private var currentFileOperationProgress: FileOperationProgress? {
-        fileOperationOwner?.fileOperationProgress
     }
 
     private var rightTopWidgetBinding: Binding<WidgetType> {
@@ -250,10 +240,7 @@ struct ContentView: View {
         .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                ToolbarTransferProgressSlot(
-                    progress: currentFileOperationProgress,
-                    onCancel: { fileOperationOwner?.cancelFileOperation() }
-                )
+                ToolbarTransferProgressSlot(queue: fileOperationQueue)
             }
             .sharedBackgroundVisibility(.hidden)
 
@@ -342,6 +329,8 @@ struct ContentView: View {
         .task {
             fileListVM.clipboardService = clipboardService
             secondFileListVM.clipboardService = clipboardService
+            fileListVM.fileOperationQueue = fileOperationQueue
+            secondFileListVM.fileOperationQueue = fileOperationQueue
             await fileListVM.reload()
         }
         .sheet(isPresented: $fileListVM.showConnectToServer) {

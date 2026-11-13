@@ -14,6 +14,15 @@ struct FileOperationProgress: Sendable {
             }
         }
 
+        nonisolated var imperative: String {
+            switch self {
+            case .copy:
+                return "Copy"
+            case .move:
+                return "Move"
+            }
+        }
+
         nonisolated var presentParticiple: String {
             switch self {
             case .copy:

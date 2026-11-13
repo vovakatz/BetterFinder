@@ -15,7 +15,6 @@ struct DisplayItem: Identifiable {
 @Observable
 final class FileListViewModel {
     private let fileSystemService = FileSystemService()
-    private let fileOperationService = FileOperationService()
     let networkService = NetworkService()
     private let tagQueryService = TagQueryService()
     private let xattrObserver = TagFSEventsObserver()
@@ -78,6 +77,7 @@ final class FileListViewModel {
 
     // Clipboard & delete state
     var clipboardService: ClipboardService?
+    var fileOperationQueue: FileOperationQueue?
     var clipboard: (urls: Set<URL>, isCut: Bool)? {
         guard let entry = clipboardService?.current else { return nil }
         return (urls: entry.urls, isCut: entry.isCut)
@@ -86,7 +86,6 @@ final class FileListViewModel {
     var itemsToDelete: Set<URL> = []
     var showOverwriteConfirmation = false
     var conflictingNames: [String] = []
-    var fileOperationProgress: FileOperationProgress?
 
     // Permission error state (privileged file operations)
     var showPermissionError = false
@@ -118,7 +117,6 @@ final class FileListViewModel {
     private var directoryMonitors: [URL: DispatchSourceFileSystemObject] = [:]
     private var refreshDebounceTask: Task<Void, Never>?
     private var pollingTask: Task<Void, Never>?
-    private var fileOperationTask: Task<Void, Never>?
 
     /// Resolves view settings for a folder path: stored deviation overrides app default.
     private func applyResolvedSettings(for path: String) {
@@ -239,7 +237,6 @@ final class FileListViewModel {
     deinit {
         for source in directoryMonitors.values { source.cancel() }
         pollingTask?.cancel()
-        fileOperationTask?.cancel()
         xattrObserver.stop()
     }
 
@@ -1121,10 +1118,6 @@ final class FileListViewModel {
         startFileOperation(urls: urls, operation: .copy, destination: dest)
     }
 
-    func cancelFileOperation() {
-        fileOperationTask?.cancel()
-    }
-
     private func startFileOperation(
         urls: [URL],
         operation: FileOperationProgress.Operation,
@@ -1132,62 +1125,40 @@ final class FileListViewModel {
         overwrite: Bool = false,
         clearCompletedCutItemsFromClipboard: Bool = false
     ) {
-        guard !urls.isEmpty else { return }
-        guard fileOperationTask == nil else {
-            errorMessage = "A file operation is already in progress."
-            return
-        }
+        guard !urls.isEmpty, let fileOperationQueue else { return }
 
         errorMessage = nil
         let sources = urls.sorted {
             $0.path.localizedStandardCompare($1.path) == .orderedAscending
         }
-        let clipboardSnapshot = clipboard
-        let service = fileOperationService
+        // The operation may wait in the queue, so remember which cut it came
+        // from: if the user cuts or copies something else meanwhile, the
+        // clipboard must be left alone when this one finishes.
+        let cutEntry = clearCompletedCutItemsFromClipboard ? clipboardService?.current : nil
 
-        fileOperationProgress = FileOperationProgress(
+        fileOperationQueue.enqueue(
+            sources: sources,
+            destination: destination,
             operation: operation,
-            completedUnitCount: 0,
-            totalUnitCount: 0,
-            currentItemName: nil,
-            statusMessage: "Preparing..."
-        )
-
-        fileOperationTask = Task.detached(priority: .utility) { [weak self] in
+            overwrite: overwrite
+        ) { [weak self] result in
             guard let self else { return }
 
-            let result = service.execute(
-                sources: sources,
-                to: destination,
-                operation: operation,
-                overwrite: overwrite,
-                isCancelled: { Task.isCancelled }
-            ) { progress in
-                DispatchQueue.main.async {
-                    self.fileOperationProgress = progress
+            if let cutEntry, cutEntry.isCut, self.clipboardService?.current?.id == cutEntry.id {
+                let remaining = cutEntry.urls.subtracting(result.completedSources)
+                if remaining.isEmpty {
+                    self.clipboardService?.clearCurrent()
+                } else if !result.allSucceeded {
+                    self.clipboardService?.replaceCurrent(urls: remaining)
                 }
             }
 
-            await MainActor.run {
-                if clearCompletedCutItemsFromClipboard, let clipboardSnapshot, clipboardSnapshot.isCut {
-                    let remaining = clipboardSnapshot.urls.subtracting(result.completedSources)
-                    if remaining.isEmpty {
-                        self.clipboardService?.clearCurrent()
-                    } else if !result.allSucceeded {
-                        self.clipboardService?.replaceCurrent(urls: remaining)
-                    }
-                }
+            if let firstError = result.errors.first, result.completedSources.isEmpty {
+                self.errorMessage = firstError
+            }
 
-                self.fileOperationProgress = nil
-                self.fileOperationTask = nil
-
-                if let firstError = result.errors.first, result.completedSources.isEmpty {
-                    self.errorMessage = firstError
-                }
-
-                if !result.completedSources.isEmpty || result.errors.isEmpty {
-                    Task { await self.reload() }
-                }
+            if !result.completedSources.isEmpty || result.errors.isEmpty {
+                Task { await self.reload() }
             }
         }
     }
