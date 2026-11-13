@@ -59,6 +59,8 @@ A window appears on the real screen and takes focus for the length of the run.
 | `tables` | Log each list's row count, selected row count, and the y coordinates of its first 40 rows. |
 | `snap <name>` | Save `<name>.png`, flattened onto white. |
 | `snapsidebar <name>` | Save the sidebar alone at 2x, which `snap` leaves blank. |
+| `snaptoolbar <name>` | Save the whole window, toolbar included, which `snap` leaves blank. |
+| `snappopover <name>` | Save the open popover's contents. Its coordinates match `usewindow popover`. |
 | `pixel <x> <y> [label]` | Log RGBA at a point. Alpha 0 means nothing is drawn there. |
 | `stall <sec>` | Log the longest main-thread stall. Start it **before** the action. |
 | `touch <name>` | Create a file in the start folder (fixtures only). |
@@ -66,7 +68,7 @@ A window appears on the real screen and takes focus for the length of the run.
 | `activate` | Take focus back from another app. Wait about 0.25 seconds after it. |
 | `scroll <x> <y> <points>` | Scroll the scroll view under a point down by that many points. Negative scrolls up. |
 | `mainmenu <title>` | Choose a menu bar item. Cmd+Delete doesn't get through as a `key` step. |
-| `usewindow <title>` | Make later steps act on the window with this title. `usewindow main` goes back. |
+| `usewindow <title>` | Make later steps act on the window with this title. `usewindow popover` picks the open popover, and `usewindow main` goes back. |
 | `default <key>` | Log a stored setting. Blank means it was never set. |
 | `quit` | Exit now. The script also exits at its end. |
 
@@ -258,7 +260,9 @@ There is no test suite. Verify changes with the driver.
 - **`stall` after a click under-reports badly.** The work has already finished by the next step, and it read 4.5ms for a click that really took over 40ms. Start it first, then `wait` longer than its duration.
 - **Debug builds overstate SwiftUI cost.** One click measured about 118ms in Debug and 83ms in Release. Identical builds also vary between runs (33 to 53ms in one case), so don't read much into a single run.
 - **`drag` only simulates the start of a drag.** A real one needs the window server, so `drag` skips the source, asks AppKit for the destination view, and then runs the real SwiftUI drop. It proves what a drop does, not that a drag starts from a row, so check that by hand.
-- **`snap` skips the sidebar and window chrome.** They render blank, which isn't a bug in the app, and the left 180 points of a snapshot are empty. Use `snapsidebar` for the sidebar.
+- **`snap` skips the sidebar and window chrome.** They render blank, which isn't a bug in the app, and the left 180 points of a snapshot are empty. Use `snapsidebar` for the sidebar and `snaptoolbar` for the toolbar, such as the copy progress pill at about (360, 26).
+- **A popover closes when another app takes focus.** Open it right after `activate` and finish its clicks within a second. A step that misses it logs `snappopover: no popover is open`.
+- **Copies on the fixtures disk are fast.** APFS clones each file, so a copy you want to watch needs thousands of files: 20,000 small ones took about 8 seconds. With the move/copy confirmation on, which is the default, a drop waits at an alert, and since `run` deletes stored settings, write `settings.general.confirmBeforeMoveOrCopy` as false before every run.
 - **The List must keep tracking the selection.** With an untracked binding it hands back a selection missing what was already selected, so Cmd+A and Cmd-click come up short of what's highlighted. `FileListRows` keeps that tracking cheap, and it only works if nothing in it changes on a selection change: no closures, and no `.equatable()`, which collapses every row into one (`tables` shows `rows=1`). `tables` reports the highlighted count, so compare it with a snapshot of the status bar.
 - **A plain click on a row already in a multi-selection keeps everything selected,** both before and after that fix. Click an unselected row to collapse the selection.
 - **Cmd+A needs focus on the file list.** With nothing clicked in list view, and in gallery view even after a click, it selected nothing. Check a run really selected everything before trusting its timing: `tables` should show `selected=` equal to `rows=`.

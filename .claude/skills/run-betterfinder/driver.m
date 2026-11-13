@@ -506,7 +506,10 @@ static void runStep(NSString *line) {
         // Later steps act on the window with this title. "main" goes back.
         targetWindow = nil;
         for (NSWindow *window in NSApp.windows) {
-            if (window.isVisible && [window.title isEqual:rest]) targetWindow = window;
+            if (!window.isVisible) continue;
+            // Popovers have no title, so "popover" names the open one.
+            BOOL isPopover = [NSStringFromClass(window.class) containsString:@"Popover"];
+            if ([rest isEqual:@"popover"] ? isPopover : [window.title isEqual:rest]) targetWindow = window;
         }
         if (![rest isEqual:@"main"] && !targetWindow) logLine(@"WARNING: no visible window titled \"%@\"", rest);
         [mainWindow() makeKeyAndOrderFront:nil];
@@ -525,6 +528,18 @@ static void runStep(NSString *line) {
         logLine(@"runloop mode: %@", NSRunLoop.currentRunLoop.currentMode);
     } else if ([command isEqual:@"snap"]) {
         snap(args[0], mainWindow().contentView);
+    } else if ([command isEqual:@"snaptoolbar"]) {
+        // `snap` captures the content view, which leaves the toolbar blank. The
+        // window's frame view holds the titlebar and toolbar too.
+        snap(args[0], mainWindow().contentView.superview);
+    } else if ([command isEqual:@"snappopover"]) {
+        NSWindow *popover = nil;
+        for (NSWindow *window in NSApp.windows) {
+            if (window.isVisible && [NSStringFromClass(window.class) containsString:@"Popover"]) popover = window;
+        }
+        // The content view only: the frame view's glass background captures as noise.
+        if (popover) snap(args[0], popover.contentView);
+        else logLine(@"snappopover: no popover is open");
     } else if ([command isEqual:@"snapsidebar"]) {
         // The window capture leaves the sidebar blank, but its table renders alone.
         snap(args[0], firstTable(mainWindow().contentView));
